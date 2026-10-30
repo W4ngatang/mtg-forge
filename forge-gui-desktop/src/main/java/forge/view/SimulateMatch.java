@@ -132,7 +132,12 @@ public class SimulateMatch {
         }
 
         if (params.containsKey("d")) {
-            for (String deck : params.get("d")) {
+            List<String> deckArgs = new ArrayList<>(params.get("d"));
+            // with a shared library (DanDan) one deck is enough: both AIs draw from it
+            if (type.hasSharedLibrary() && deckArgs.size() == 1) {
+                deckArgs.add(deckArgs.get(0));
+            }
+            for (String deck : deckArgs) {
                 Deck d = deckFromCommandLineParameter(deck, type, deckDir);
                 if (d == null) {
                     System.out.println(TextUtil.concatNoSpace("Could not load deck - ", deck, ", match cannot start"));

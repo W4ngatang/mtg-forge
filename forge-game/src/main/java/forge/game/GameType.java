@@ -128,6 +128,14 @@ public enum GameType {
     }
 
     /**
+     * @return true when all players draw from one library. The first seat's deck becomes that
+     * library, and the generated deck is only used when that seat chose none.
+     */
+    public boolean hasSharedLibrary() {
+        return sharedZones.contains(ZoneType.Library);
+    }
+
+    /**
      * @return the isCardpoolLimited
      */
     public boolean isCardPoolLimited() {
