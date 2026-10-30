@@ -32,6 +32,9 @@ public final class ForgeConstants {
     public static final String GITHUB_RELEASES_ATOM             = GITHUB_FORGE_URL + "releases.atom";
     public static final String GITHUB_COMMITS_ATOM              = GITHUB_FORGE_URL + "commits/master.atom";
     public static final String GITHUB_SNAPSHOT_URL              = GITHUB_FORGE_URL + "releases/download/daily-snapshots/";
+    // Android test builds of this fork fetch their APK updates and game data from the fork's own
+    // release, published by .github/workflows/android-test-apk.yml
+    public static final String ANDROID_SNAPSHOT_URL             = "https://github.com/W4ngatang/mtg-forge/releases/download/android-test/";
     public static final String NETWORK_PLAY_WIKI_URL            = GITHUB_FORGE_URL + "wiki/network-play";
     public static final String RELEASE_URL                      = "https://releases.cardforge.org/";
     public static final String PATH_SEPARATOR                   = File.separator;

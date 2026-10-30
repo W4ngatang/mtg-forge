@@ -261,6 +261,7 @@ public abstract class GameLobby implements IHasGameType {
             data.appliedVariants.remove(GameType.Brawl);
             data.appliedVariants.remove(GameType.MomirBasic);
             data.appliedVariants.remove(GameType.MoJhoSto);
+            data.appliedVariants.remove(GameType.DanDan);
             break;
         case Oathbreaker:
             data.appliedVariants.remove(GameType.Commander);
@@ -268,6 +269,7 @@ public abstract class GameLobby implements IHasGameType {
             data.appliedVariants.remove(GameType.Brawl);
             data.appliedVariants.remove(GameType.MomirBasic);
             data.appliedVariants.remove(GameType.MoJhoSto);
+            data.appliedVariants.remove(GameType.DanDan);
             break;
         case TinyLeaders:
             data.appliedVariants.remove(GameType.Commander);
@@ -275,6 +277,7 @@ public abstract class GameLobby implements IHasGameType {
             data.appliedVariants.remove(GameType.Brawl);
             data.appliedVariants.remove(GameType.MomirBasic);
             data.appliedVariants.remove(GameType.MoJhoSto);
+            data.appliedVariants.remove(GameType.DanDan);
             break;
         case Brawl:
             data.appliedVariants.remove(GameType.Commander);
@@ -282,10 +285,12 @@ public abstract class GameLobby implements IHasGameType {
             data.appliedVariants.remove(GameType.TinyLeaders);
             data.appliedVariants.remove(GameType.MomirBasic);
             data.appliedVariants.remove(GameType.MoJhoSto);
+            data.appliedVariants.remove(GameType.DanDan);
             break;
         case Vanguard:
             data.appliedVariants.remove(GameType.MomirBasic);
             data.appliedVariants.remove(GameType.MoJhoSto);
+            data.appliedVariants.remove(GameType.DanDan);
             break;
         case MomirBasic:
             data.appliedVariants.remove(GameType.Commander);
@@ -294,6 +299,7 @@ public abstract class GameLobby implements IHasGameType {
             data.appliedVariants.remove(GameType.Brawl);
             data.appliedVariants.remove(GameType.Vanguard);
             data.appliedVariants.remove(GameType.MoJhoSto);
+            data.appliedVariants.remove(GameType.DanDan);
             break;
         case MoJhoSto:
             data.appliedVariants.remove(GameType.Commander);
@@ -302,6 +308,16 @@ public abstract class GameLobby implements IHasGameType {
             data.appliedVariants.remove(GameType.Brawl);
             data.appliedVariants.remove(GameType.Vanguard);
             data.appliedVariants.remove(GameType.MomirBasic);
+            data.appliedVariants.remove(GameType.DanDan);
+            break;
+        case DanDan:
+            data.appliedVariants.remove(GameType.Commander);
+            data.appliedVariants.remove(GameType.Oathbreaker);
+            data.appliedVariants.remove(GameType.TinyLeaders);
+            data.appliedVariants.remove(GameType.Brawl);
+            data.appliedVariants.remove(GameType.Vanguard);
+            data.appliedVariants.remove(GameType.MomirBasic);
+            data.appliedVariants.remove(GameType.MoJhoSto);
             break;
         default:
             break;

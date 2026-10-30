@@ -807,6 +807,11 @@ public class GameAction {
 
         c = changeZone(zoneFrom, zoneTo, c, position, cause, params);
 
+        // A card leaving a shared zone (DanDan) now belongs to the player who received it
+        if (zoneFrom instanceof PlayerZone from && from.isShared() && !(zoneTo instanceof PlayerZone to && to.isShared())) {
+            c.setOwner(zoneTo instanceof PlayerZone to ? to.getPlayer() : c.getController());
+        }
+
         // need to refresh ability text for affected cards
         for (final StaticAbility stAb : c.getStaticAbilities()) {
             if (!stAb.checkConditions()) {
@@ -873,8 +878,23 @@ public class GameAction {
         return moveToHand(c, cause, AbilityKey.newMap());
     }
     public final Card moveToHand(final Card c, SpellAbility cause, Map<AbilityKey, Object> params) {
-        final PlayerZone hand = c.getOwner().getZone(ZoneType.Hand);
+        final PlayerZone hand = sharedZoneRecipient(c, cause).getZone(ZoneType.Hand);
         return moveTo(hand, c, cause, params);
+    }
+
+    /**
+     * The player a card goes to when an effect moves it to "its owner's" zone. A card in a zone the
+     * players share (DanDan's library and graveyard) has no single owner, so it goes to the player
+     * whose effect moved it.
+     */
+    private Player sharedZoneRecipient(final Card c, final SpellAbility cause) {
+        if (game.getZoneOf(c) instanceof PlayerZone pz && pz.isShared() && cause != null) {
+            final Player activator = cause.getActivatingPlayer();
+            if (activator != null && pz.isZoneOf(activator)) {
+                return activator;
+            }
+        }
+        return c.getOwner();
     }
 
     public final Card moveToPlay(final Card c, SpellAbility cause, Map<AbilityKey, Object> params) {

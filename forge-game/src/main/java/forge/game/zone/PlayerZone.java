@@ -18,6 +18,7 @@
 package forge.game.zone;
 
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import forge.game.card.Card;
 import forge.game.card.CardLists;
 import forge.game.keyword.Keyword;
@@ -25,6 +26,7 @@ import forge.game.player.Player;
 import forge.game.spellability.SpellAbility;
 import forge.util.Lang;
 
+import java.util.List;
 import java.util.function.Predicate;
 
 /**
@@ -75,6 +77,8 @@ public class PlayerZone extends Zone {
     }
 
     private final Player player;
+    // Other players using this zone as their own, as in DanDan's shared library and graveyard
+    private final List<Player> sharedWith = Lists.newArrayList();
 
     public PlayerZone(final ZoneType zone, final Player inPlayer) {
         super(zone, inPlayer.getGame());
@@ -87,10 +91,28 @@ public class PlayerZone extends Zone {
             sort();
         }
         player.updateZoneForView(this);
+        for (final Player p : sharedWith) {
+            p.updateZoneForView(this);
+        }
     }
 
     public final Player getPlayer() {
         return player;
+    }
+
+    public final void shareWith(final Player other) {
+        if (other != player && !sharedWith.contains(other)) {
+            sharedWith.add(other);
+        }
+    }
+
+    public final boolean isShared() {
+        return !sharedWith.isEmpty();
+    }
+
+    /** True when this zone is {@code p}'s own, either as its first owner or by sharing. */
+    public final boolean isZoneOf(final Player p) {
+        return player.equals(p) || sharedWith.contains(p);
     }
 
     @Override
@@ -100,7 +122,7 @@ public class PlayerZone extends Zone {
 
     public Iterable<Card> getCardsPlayerCanActivate(Player who) {
         Iterable<Card> cl = getCards(false);
-        boolean checkingForOwner = who == player;
+        boolean checkingForOwner = isZoneOf(who);
 
         if (checkingForOwner && (is(ZoneType.Battlefield) || is(ZoneType.Hand))) {
             return cl;

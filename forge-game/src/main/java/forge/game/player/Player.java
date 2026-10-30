@@ -1299,6 +1299,13 @@ public class Player extends GameEntity implements Comparable<Player> {
     public final PlayerZone getZone(final ZoneType zone) {
         return zones.get(zone);
     }
+
+    /** Use another player's zone as this player's own, as DanDan does with its library and graveyard. */
+    public final void useSharedZone(final PlayerZone zone) {
+        zones.put(zone.getZoneType(), zone);
+        zone.shareWith(this);
+        updateZoneForView(zone);
+    }
     public void updateZoneForView(PlayerZone zone) {
         view.updateZone(zone);
     }

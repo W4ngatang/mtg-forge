@@ -96,7 +96,7 @@ public class VLobby implements ILobbyView {
     private static final ImmutableList<GameType> GAME_FORMATS = ImmutableList.of(
             GameType.Constructed, GameType.Commander, GameType.Oathbreaker,
             GameType.Brawl, GameType.TinyLeaders,
-            GameType.MomirBasic, GameType.MoJhoSto);
+            GameType.MomirBasic, GameType.MoJhoSto, GameType.DanDan);
 
     private final FComboBoxPanel<GameType> cboFormatPanel =
             new FComboBoxPanel<>(Localizer.getInstance().getMessage("lblGameFormat") + ":", GAME_FORMATS);

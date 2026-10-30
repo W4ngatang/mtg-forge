@@ -217,6 +217,16 @@ public class Match {
         library.setCards(newLibrary);
     }
 
+    /** Variants like DanDan have every player use the first player's library and graveyard. */
+    public static void shareZones(final Game game) {
+        final FCollectionView<Player> players = game.getPlayers();
+        for (final ZoneType zoneType : game.getRules().getSharedZones()) {
+            for (int i = 1; i < players.size(); i++) {
+                players.get(i).useSharedZone(players.get(0).getZone(zoneType));
+            }
+        }
+    }
+
     private void prepareAllZones(final Game game) {
         // need this code here, otherwise observables fail
         Trigger.resetIDs();
@@ -229,6 +239,9 @@ public class Match {
 
         final FCollectionView<Player> players = game.getPlayers();
         final List<RegisteredPlayer> playersConditions = game.getMatch().getPlayers();
+
+        final Set<ZoneType> sharedZones = rules.getSharedZones();
+        shareZones(game);
 
         boolean isFirstGame = gameOutcomes.isEmpty();
         boolean canSideBoard = !isFirstGame && rules.getGameType().isSideboardingAllowed();
@@ -313,7 +326,10 @@ public class Match {
                 }
             }
 
-            preparePlayerZone(player, ZoneType.Library, myDeck.getLeft().getMain(), psc.useRandomFoil());
+            // a shared library is filled once, from the first player's deck
+            if (i == 0 || !sharedZones.contains(ZoneType.Library)) {
+                preparePlayerZone(player, ZoneType.Library, myDeck.getLeft().getMain(), psc.useRandomFoil());
+            }
             if (myDeck.getLeft().has(DeckSection.Sideboard)) {
                 preparePlayerZone(player, ZoneType.Sideboard, myDeck.getLeft().get(DeckSection.Sideboard), psc.useRandomFoil());
 

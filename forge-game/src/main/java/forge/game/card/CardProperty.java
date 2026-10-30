@@ -25,6 +25,7 @@ import forge.game.staticability.StaticAbilityCantBeBeamedUp;
 import forge.game.spellability.OptionalCost;
 import forge.game.spellability.SpellAbility;
 import forge.game.spellability.SpellAbilityStackInstance;
+import forge.game.zone.PlayerZone;
 import forge.game.zone.Zone;
 import forge.game.zone.ZoneType;
 import forge.item.PaperCard;
@@ -39,6 +40,14 @@ import org.apache.commons.lang3.tuple.Pair;
 import java.util.*;
 
 public class CardProperty {
+
+    /**
+     * A card in a zone the players share (DanDan's library and graveyard) belongs to each of them
+     * for "you own" and "you control" checks, so "your graveyard" means the shared one.
+     */
+    private static boolean inSharedZoneOf(Card card, Player p) {
+        return card.getZone() instanceof PlayerZone pz && pz.isShared() && pz.isZoneOf(p);
+    }
 
     public static boolean cardHasProperty(Card card, String property, Player sourceController, Card source, CardTraitBase spellAbility) {
         final Game game = card.getGame();
@@ -176,7 +185,7 @@ public class CardProperty {
                 return false;
             }
         } else if (property.startsWith("YouCtrl")) {
-            if (!controller.equals(sourceController)) {
+            if (!controller.equals(sourceController) && !inSharedZoneOf(card, sourceController)) {
                 return false;
             }
         } else if (property.startsWith("YourTeamCtrl")) {
@@ -184,11 +193,11 @@ public class CardProperty {
                 return false;
             }
         } else if (property.startsWith("YouDontCtrl")) {
-            if (controller.equals(sourceController)) {
+            if (controller.equals(sourceController) || inSharedZoneOf(card, sourceController)) {
                 return false;
             }
         } else if (property.startsWith("OppCtrl")) {
-            if (!controller.getOpponents().contains(sourceController)) {
+            if (!controller.getOpponents().contains(sourceController) || inSharedZoneOf(card, sourceController)) {
                 return false;
             }
         } else if (property.startsWith("ChosenCtrl")) {
@@ -284,15 +293,15 @@ public class CardProperty {
                 return false;
             }
         } else if (property.startsWith("YouOwn")) {
-            if (!card.getOwner().equals(sourceController)) {
+            if (!card.getOwner().equals(sourceController) && !inSharedZoneOf(card, sourceController)) {
                 return false;
             }
         } else if (property.startsWith("YouDontOwn")) {
-            if (card.getOwner().equals(sourceController)) {
+            if (card.getOwner().equals(sourceController) || inSharedZoneOf(card, sourceController)) {
                 return false;
             }
         } else if (property.startsWith("OppOwn")) {
-            if (!card.getOwner().getOpponents().contains(sourceController)) {
+            if (!card.getOwner().getOpponents().contains(sourceController) || inSharedZoneOf(card, sourceController)) {
                 return false;
             }
         } else if (property.equals("TargetedPlayerOwn")) {

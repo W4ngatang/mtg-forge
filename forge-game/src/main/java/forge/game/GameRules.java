@@ -3,6 +3,8 @@ package forge.game;
 import java.util.EnumSet;
 import java.util.Set;
 
+import forge.game.zone.ZoneType;
+
 public class GameRules {
     private final GameType gameType;
     private boolean manaBurn;
@@ -119,6 +121,17 @@ public class GameRules {
 
     public boolean hasAppliedVariant(final GameType variant) {
         return appliedVariants.contains(variant);
+    }
+
+    /**
+     * @return the zones every player shares, collected from the applied variants.
+     */
+    public Set<ZoneType> getSharedZones() {
+        final Set<ZoneType> shared = EnumSet.noneOf(ZoneType.class);
+        for (final GameType variant : appliedVariants) {
+            shared.addAll(variant.getSharedZones());
+        }
+        return shared;
     }
 
     public boolean hasCommander() {

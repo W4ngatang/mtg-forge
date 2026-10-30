@@ -1,0 +1,94 @@
+name: Android test APK
+
+# Builds an installable Android APK from this branch, plus the game data the app downloads on
+# first launch, and publishes them to the "android-test" release. The app looks for updates there
+# (ForgeConstants.ANDROID_SNAPSHOT_URL). The APK is signed with the public debug key bundled in
+# uber-apk-signer, so each new build installs over the last one.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ 'ccr-0fcd92aa-6egimh' ]
+    paths-ignore: [ 'docs/**', 'plans/**', '**.md' ]
+
+concurrency:
+  group: android-test-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Set Up Android tools
+        run: |
+          JAVA_HOME=${JAVA_HOME_17_X64} ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT --install "build-tools;35.0.0" "platform-tools" "platforms;android-35"
+
+      - name: Install Android maven plugin
+        run: |
+          mkdir -p ~/.m2/repository/com/simpligility/maven/plugins/android-maven-plugin/4.6.2
+          cd ~/.m2/repository/com/simpligility/maven/plugins/android-maven-plugin/4.6.2
+          curl -L -o android-maven-plugin-4.6.2.jar https://github.com/Card-Forge/android-maven-plugin/releases/download/4.6.2/android-maven-plugin-4.6.2.jar
+          curl -L -o android-maven-plugin-4.6.2.pom https://github.com/Card-Forge/android-maven-plugin/releases/download/4.6.2/android-maven-plugin-4.6.2.pom
+
+      - name: Install virtual framebuffer
+        run: command -v Xvfb >/dev/null 2>&1 || { sudo apt update && sudo apt install -y xvfb; }
+
+      - name: Build APK
+        run: |
+          export DISPLAY=":1"
+          Xvfb :1 -screen 0 800x600x8 &
+          export _JAVA_OPTIONS="-Xmx3g"
+          mvn -U -B -P android-test-build install -e -pl forge-gui-android -am -Dandroid.sdk.path=$ANDROID_SDK_ROOT -Dandroid.buildToolsVersion=35.0.0 -Dmaven.test.skip=true
+
+      - name: Package APK and game data
+        run: |
+          set -e
+          target=forge-gui-android/target
+          version=$(cat $target/classes/assets/version.txt)
+          echo "Version: $version"
+          mkdir upload
+          # the in-app updater expects this file name
+          apk=$(ls $target/*.apk | grep -i -E 'signed|aligned' | head -1)
+          cp "$apk" "upload/forge-android-$version-signed-aligned.apk"
+          cp $target/classes/assets/version.txt $target/classes/assets/build.txt upload/
+          # assets.zip, laid out as the android-release-build profile does it
+          mkdir -p staging/res/cardsfolder
+          rsync -a --exclude 'cardsfolder/' --exclude '*.xcf' forge-gui/res/ staging/res/
+          cp $target/classes/assets/build.txt staging/res/
+          (cd forge-gui/res/cardsfolder && zip -q -1 -r ../../../staging/res/cardsfolder/cardsfolder.zip .)
+          (cd staging && zip -q -1 -r ../upload/assets.zip .)
+          ls -la upload
+
+      - name: Publish to the android-test release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Android test build of ${GITHUB_SHA::7} from ${GITHUB_REF_NAME}. Install the .apk file on your phone; see plans/android-test-build.md."
+          if gh release view android-test >/dev/null 2>&1; then
+            gh release edit android-test --prerelease --notes "$notes"
+            # drop the previous build's files so only the current APK is listed
+            for asset in $(gh release view android-test --json assets --jq '.assets[].name'); do
+              gh release delete-asset android-test "$asset" -y
+            done
+          else
+            gh release create android-test --prerelease --title "Android test build" --notes "$notes" --target "$GITHUB_SHA"
+          fi
+          gh release upload android-test upload/* --clobber
+
+      - name: Keep the APK as a workflow artifact too
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-android-apk
+          path: upload/*.apk
+          retention-days: 14
