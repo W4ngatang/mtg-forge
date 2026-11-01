@@ -20,7 +20,7 @@ public class CardThemedMatrixIO {
     public static void saveMatrix(String format, HashMap<String,List<Map.Entry<PaperCard,Integer>>> map){
         File file = getMatrixFile(format);
         try (FileOutputStream f = new FileOutputStream(file);
-             ObjectOutputStream s = new ObjectOutputStream(f)) {
+             ObjectOutputStream s = new ObjectOutputStream(new BufferedOutputStream(f))) {
             s.writeObject(map);
         } catch (IOException e) {
             System.out.println("Error writing matrix data: " + e);
@@ -29,7 +29,7 @@ public class CardThemedMatrixIO {
 
     public static HashMap<String,List<Map.Entry<PaperCard,Integer>>> loadMatrix(String format){
         try (FileInputStream fin = new FileInputStream(getMatrixFile(format));
-             ObjectInputStream s = new ObjectInputStream(fin)){
+             ObjectInputStream s = new ObjectInputStream(new BufferedInputStream(fin))){
             HashMap<String, List<Map.Entry<PaperCard,Integer>>> matrix = (HashMap<String, List<Map.Entry<PaperCard,Integer>>>) s.readObject();
             return matrix;
         }catch (Exception e){

@@ -1,10 +1,12 @@
 package forge.assets;
 
 import java.io.IOException;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 import com.badlogic.gdx.files.FileHandle;
 import forge.gui.GuiBase;
@@ -35,6 +37,14 @@ import static forge.localinstance.properties.ForgeConstants.RES_DIR;
 public class AssetsDownloader {
     private final static ImmutableList<String> downloadIgnoreExit = ImmutableList.of("Download", "Ignore", "Exit");
     private final static ImmutableList<String> downloadExit = ImmutableList.of("Download", "Exit");
+
+    private static String readUrl(final String url) {
+        try {
+            return FileUtil.readFileToString(new URL(url));
+        } catch (MalformedURLException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     public static void checkForUpdates(boolean exited, Runnable runnable) {
         if (exited)
@@ -69,9 +79,12 @@ public class AssetsDownloader {
         String message;
         boolean connectedToInternet = Forge.getDeviceAdapter().isConnectedToInternet();
         if (connectedToInternet) {
-            //currently for desktop/mobile-dev release on github
-            final String releaseTag = Forge.getDeviceAdapter().getReleaseTag(GITHUB_RELEASES_ATOM);
+            //currently for desktop/mobile-dev release on github; snapshots read their version from version.txt instead
+            final String releaseTag = isSnapshots ? "" : Forge.getDeviceAdapter().getReleaseTag(GITHUB_RELEASES_ATOM);
             try {
+                //fetch the snapshot build date alongside version.txt rather than after it
+                final CompletableFuture<String> snapsBuildTxt = isSnapshots
+                        ? CompletableFuture.supplyAsync(() -> readUrl(snapsURL + "build.txt")) : null;
                 URL versionUrl = new URL(versionText);
                 String version = isSnapshots ? FileUtil.readFileToString(versionUrl) : releaseTag.replace("forge-", "");
                 String filename = "";
@@ -88,8 +101,7 @@ public class AssetsDownloader {
                 }
                 String snapsBuildDate = "", buildDate = "";
                 if (isSnapshots) {
-                    URL url = new URL(snapsURL + "build.txt");
-                    snapsTimestamp = format.parse(FileUtil.readFileToString(url));
+                    snapsTimestamp = format.parse(snapsBuildTxt.join());
                     snapsBuildDate = snapsTimestamp.toString();
                     if (!GuiBase.isAndroid()) {
                         buildDate = BuildInfo.getTimestamp().toString();

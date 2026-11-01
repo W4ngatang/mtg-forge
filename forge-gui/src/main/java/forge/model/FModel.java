@@ -65,6 +65,9 @@ import forge.util.storage.StorageBase;
 import java.io.File;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
 
@@ -296,11 +299,13 @@ public final class FModel {
 
         // Generate Deck Gen matrix
         if(getPreferences().getPrefBoolean(FPref.DECKGEN_CARDBASED) && !loadCardsLazily) {
-            boolean commanderDeckGenMatrixLoaded=CardRelationMatrixGenerator.initialize();
-            deckGenMatrixLoaded=CardArchetypeLDAGenerator.initialize();
-            if(!commanderDeckGenMatrixLoaded){
-                deckGenMatrixLoaded=false;
-            }
+            // only card-based random decks need these, so load them while startup carries on;
+            // isdeckGenMatrixLoaded() waits for the result
+            deckGenMatrixLoading = CompletableFuture.supplyAsync(() -> {
+                boolean commanderDeckGenMatrixLoaded=CardRelationMatrixGenerator.initialize();
+                boolean ldaLoaded=CardArchetypeLDAGenerator.initialize();
+                return commanderDeckGenMatrixLoaded && ldaLoaded;
+            }, ThreadUtil.getServicePool());
         }
     }
 
@@ -314,10 +319,19 @@ public final class FModel {
         });
     }
 
-    private static boolean deckGenMatrixLoaded = false;
+    private static volatile CompletableFuture<Boolean> deckGenMatrixLoading = null;
 
     public static boolean isdeckGenMatrixLoaded(){
-        return deckGenMatrixLoaded;
+        final CompletableFuture<Boolean> loading = deckGenMatrixLoading;
+        if (loading == null) {
+            return false;
+        }
+        try {
+            return loading.join();
+        } catch (CompletionException | CancellationException e) {
+            e.printStackTrace();
+            return false;
+        }
     }
 
     public static QuestController getQuest() {

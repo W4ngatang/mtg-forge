@@ -3,8 +3,10 @@ package forge.app;
 import forge.util.TextUtil;
 import org.apache.commons.text.StringEscapeUtils;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.net.URLConnection;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
@@ -14,7 +16,7 @@ public class GitLogs {
         String message = "";
         try {
             URL url = new URL(commitsAtom);
-            InputStream inputStream = url.openStream();
+            InputStream inputStream = openWithTimeout(url);
             List<AtomReader.Entry> entries = new AtomReader().parse(inputStream);
             StringBuilder logs = new StringBuilder();
             SimpleDateFormat simpleDate = TextUtil.getSimpleDate();
@@ -51,7 +53,7 @@ public class GitLogs {
         String tag = "";
         try {
             URL url = new URL(releaseAtom);
-            InputStream inputStream = url.openStream();
+            InputStream inputStream = openWithTimeout(url);
             List<AtomReader.Entry> entries = new AtomReader().parse(inputStream);
             for (AtomReader.Entry entry : entries) {
                 if (entry.link != null) {
@@ -69,5 +71,13 @@ public class GitLogs {
             e.printStackTrace();
         }
         return tag;
+    }
+
+    //these feeds are read while the splash screen waits, so never let a stalled connection hang startup
+    private static InputStream openWithTimeout(URL url) throws IOException {
+        URLConnection connection = url.openConnection();
+        connection.setConnectTimeout(5000);
+        connection.setReadTimeout(5000);
+        return connection.getInputStream();
     }
 }

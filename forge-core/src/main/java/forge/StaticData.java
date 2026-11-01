@@ -87,6 +87,8 @@ public class StaticData {
         this.cardReader = cardReader;
         this.customCardReader = customCardReader;
         this.tokenReader = tokenReader;
+        // card scripts don't depend on the editions, so parse them while the edition files are read
+        final Future<Iterable<CardRules>> cardsLoading = ThreadUtil.getServicePool().submit(cardReader::loadCards);
         this.editions = new CardEdition.Collection(new CardEdition.Reader(new File(editionFolder)));
         this.blockDataFolder = blockDataFolder;
         this.allowCustomCardsInDecksConformance = allowCustomCardsInDecksConformance;
@@ -112,7 +114,7 @@ public class StaticData {
                 }
             }
 
-            for (CardRules card : cardReader.loadCards()) {
+            for (CardRules card : awaitCards(cardsLoading)) {
                 if (null == card) continue;
 
                 final String cardName = card.getPreInitName();
@@ -167,6 +169,17 @@ public class StaticData {
                     setLookup.put(f.getName().replace(".txt",""), FileUtil.readFile(f));
                 }
             }
+        }
+    }
+
+    private static Iterable<CardRules> awaitCards(final Future<Iterable<CardRules>> cardsLoading) {
+        try {
+            return cardsLoading.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e.getCause());
         }
     }
 

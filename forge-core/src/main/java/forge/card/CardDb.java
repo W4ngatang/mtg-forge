@@ -52,6 +52,11 @@ public final class CardDb implements ICardDatabase, IDeckGenPool {
     private final ListMultimap<String, PaperCard> allCardsByName = Multimaps.newListMultimap(new ConcurrentSkipListMap<>(String.CASE_INSENSITIVE_ORDER), Lists::newArrayList);
     private final Map<String, CardRules> rulesByPrimaryName;
     private final Map<String, CardRules> rulesByAltName = new ConcurrentSkipListMap<>(String.CASE_INSENSITIVE_ORDER);
+    // Startup speed: while initialize() adds every printing, these remember each name's and each
+    // rules' list in the multimaps above, so the ~100k additions skip the case-insensitive
+    // skip-list lookups. Writes to the cached lists go straight through to the multimaps.
+    private Map<String, List<PaperCard>> printsByNameDuringInit;
+    private Map<CardRules, List<PaperCard>> printsByRulesDuringInit;
     private final ListMultimap<CardRules, PaperCard> allCardsByRules = Multimaps.newListMultimap(new ConcurrentSkipListMap<>(CARD_RULES_NAME_COMPARATOR), Lists::newArrayList);
     private final Map<CardRules, PaperCard> uniqueCardsByRules = new ConcurrentSkipListMap<>(CARD_RULES_NAME_COMPARATOR);
     private final Map<String, ICardFace> facesByName = new ConcurrentSkipListMap<>(String.CASE_INSENSITIVE_ORDER);
@@ -612,6 +617,11 @@ public final class CardDb implements ICardDatabase, IDeckGenPool {
         List<String> missingCards = new ArrayList<>();
         CardEdition upcomingSet = null;
         Date today = new Date();
+        // edition files nearly always spell names exactly as the card scripts do, so try a hash
+        // lookup before the case-insensitive one
+        final Map<String, CardRules> rulesByExactName = new HashMap<>(rulesByPrimaryName);
+        printsByNameDuringInit = new HashMap<>();
+        printsByRulesDuringInit = new IdentityHashMap<>();
 
         for (CardEdition e : editions.getOrderedEditions()) {
             boolean coreOrExpSet = e.getType() == CardEdition.Type.CORE || e.getType() == CardEdition.Type.EXPANSION;
@@ -624,7 +634,9 @@ public final class CardDb implements ICardDatabase, IDeckGenPool {
             }
 
             for (CardEdition.EditionEntry cis : e.getAllCardsInSet()) {
-                CardRules cr = rulesByPrimaryName.get(cis.name());
+                CardRules cr = rulesByExactName.get(cis.name());
+                if (cr == null)
+                    cr = rulesByPrimaryName.get(cis.name());
                 if (cr == null)
                     cr = rulesByAltName.get(cis.name()); //Entry written using a flavor name
                 if (cr == null) {
@@ -662,6 +674,8 @@ public final class CardDb implements ICardDatabase, IDeckGenPool {
         }
 
         addUnassignedCardPrints(enableUnknownCards, upcomingSet);
+        printsByNameDuringInit = null;
+        printsByRulesDuringInit = null;
 
         initialized = true;
         reIndex();
@@ -711,10 +725,14 @@ public final class CardDb implements ICardDatabase, IDeckGenPool {
         }
 
         String mainName = paperCard.getName();
-        allCardsByName.put(mainName, paperCard);
-
         CardRules rules = paperCard.getRules();
-        allCardsByRules.put(rules, paperCard);
+        if (printsByNameDuringInit != null) {
+            printsByNameDuringInit.computeIfAbsent(mainName, allCardsByName::get).add(paperCard);
+            printsByRulesDuringInit.computeIfAbsent(rules, allCardsByRules::get).add(paperCard);
+        } else {
+            allCardsByName.put(mainName, paperCard);
+            allCardsByRules.put(rules, paperCard);
+        }
         if (rules.getSplitType() == CardSplitType.None && !rules.hasFunctionalVariants()) {
             return;
         }

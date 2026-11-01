@@ -20,7 +20,7 @@ public class CardThemedLDAIO {
     public static void saveRawLDA(String format, List<Archetype> lda){
         File file = getRAWLDAFile(format);
         try (FileOutputStream f = new FileOutputStream(file);
-             ObjectOutputStream s = new ObjectOutputStream(f)){
+             ObjectOutputStream s = new ObjectOutputStream(new BufferedOutputStream(f))){
             s.writeObject(lda);
         } catch (IOException e) {
             System.out.println("Error writing matrix data: " + e);
@@ -29,7 +29,7 @@ public class CardThemedLDAIO {
 
     public static List<Archetype> loadRawLDA(String format){
         try (FileInputStream fin = new FileInputStream(getRAWLDAFile(format));
-             ObjectInputStream s = new ObjectInputStream(fin)) {
+             ObjectInputStream s = new ObjectInputStream(new BufferedInputStream(fin))) {
             List<Archetype> matrix = (List<Archetype>) s.readObject();
             return matrix;
         } catch (Exception e){
@@ -42,7 +42,7 @@ public class CardThemedLDAIO {
         File file = getLDAFile(format);
 
         try (FileOutputStream f = new FileOutputStream(file);
-             ObjectOutputStream s = new ObjectOutputStream(f)){
+             ObjectOutputStream s = new ObjectOutputStream(new BufferedOutputStream(f))){
             s.writeObject(map);
         } catch (IOException e) {
             System.out.println("Error writing matrix data: " + e);
@@ -51,7 +51,7 @@ public class CardThemedLDAIO {
 
     public static Map<String,List<List<Pair<String, Double>>>> loadLDA(String format){
         try (FileInputStream fin = new FileInputStream(getLDAFile(format));
-             ObjectInputStream s = new ObjectInputStream(fin)) {
+             ObjectInputStream s = new ObjectInputStream(new BufferedInputStream(fin))) {
             Map<String,List<List<Pair<String, Double>>>> matrix = (Map<String,List<List<Pair<String, Double>>>>) s.readObject();
             return matrix;
         } catch (Exception e){
