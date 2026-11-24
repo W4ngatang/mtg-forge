@@ -1,8 +1,10 @@
 package forge.web;
 
 import java.net.URL;
-import java.security.MessageDigest;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.security.MessageDigest;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -19,22 +21,34 @@ import forge.localinstance.properties.ForgePreferences.FPref;
 import forge.model.FModel;
 
 /**
- * The web server: the browser app from {@code /web} on the classpath, and games over {@code /ws}.
+ * The web server: the browser app from {@code /web} on the classpath, the lobby under {@code /api}
+ * (see {@link ApiServlet}) and games over {@code /ws}.
  *
- * <p>Run: {@code java -Dforge.web.assets=<folder holding res/> -cp ... forge.web.WebServer [port]}.
- * The host password, needed to create games, comes from the {@code FORGE_WEB_PASSWORD} environment
- * variable; without it anyone who can reach the server can create games.
+ * <p>Run: {@code java -Dforge.web.assets=<folder holding res/> -jar forge-web-...-jar-with-dependencies.jar [port]}.
+ * The host password, needed to create games and manage saved decks, comes from the
+ * {@code FORGE_WEB_PASSWORD} environment variable; without it anyone who can reach the server can.
+ * Saved decks go in the folder named by {@code -Dforge.web.data} (default {@code forge-web-data}).
  */
 public class WebServer {
     public static final String PASSWORD_ENV = "FORGE_WEB_PASSWORD";
+    public static final String DATA_PROPERTY = "forge.web.data";
     private static final long IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+    /** Games running at once; each holds a game thread and the computer's thinking. */
+    static final int MAX_GAMES = 12;
+    private static final int MAX_NAME = 20;
 
     private final Map<String, GameRoom> rooms = new ConcurrentHashMap<>();
     private final String password;
+    private final DeckLists decks;
     private Server jetty;
 
     public WebServer(String password) {
+        this(password, Paths.get(System.getProperty(DATA_PROPERTY, "forge-web-data")));
+    }
+
+    public WebServer(String password, Path dataFolder) {
         this.password = password == null || password.isEmpty() ? null : password;
+        this.decks = new DeckLists(dataFolder.resolve("decks"));
     }
 
     private static boolean forgeLoaded;
@@ -75,6 +89,8 @@ public class WebServer {
                 factory.setCreator((req, resp) -> new GameSocket(WebServer.this));
             }
         }), "/ws");
+        context.addServlet(new ServletHolder("api", new ApiServlet(this)), "/api/*");
+        context.addServlet(new ServletHolder("img", new ImageServlet()), "/img");
         context.addServlet(new ServletHolder("static", DefaultServlet.class), "/");
         jetty.setHandler(context);
         jetty.start();
@@ -90,11 +106,26 @@ public class WebServer {
         }
     }
 
-    GameRoom newRoom(WebFormat format, String playerName) {
-        rooms.values().removeIf(GameRoom::isOver);
-        GameRoom room = new GameRoom(format, playerName);
+    synchronized GameRoom newRoom(WebFormat format, String hostName, forge.deck.Deck deck, boolean againstFriend) {
+        rooms.values().removeIf(GameRoom::isStale);
+        if (rooms.size() >= MAX_GAMES) {
+            throw new ApiServlet.ApiError(503, "The server is running as many games as it can. Try again later.");
+        }
+        GameRoom room = againstFriend ? GameRoom.againstFriend(format, hostName, deck) : GameRoom.againstComputer(format, hostName, deck);
         rooms.put(room.id, room);
         return room;
+    }
+
+    DeckLists decks() {
+        return decks;
+    }
+
+    static String playerName(String raw) {
+        String name = raw == null ? "" : raw.replaceAll("[^\\p{L}\\p{N} _-]", "").trim();
+        if (name.length() > MAX_NAME) {
+            name = name.substring(0, MAX_NAME).trim();
+        }
+        return name.isEmpty() ? "Player" : name;
     }
 
     GameRoom room(String id) {

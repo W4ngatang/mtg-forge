@@ -43,9 +43,11 @@ public class WebPlayTest {
     private WebServer server;
     private WebSocketClient client;
 
+    private final java.net.http.HttpClient http = java.net.http.HttpClient.newHttpClient();
+
     @BeforeClass(timeOut = 300_000)
     public void startServer() throws Exception {
-        server = new WebServer(PASSWORD);
+        server = new WebServer(PASSWORD, java.nio.file.Files.createTempDirectory("forge-web-test"));
         server.start(0);
         client = new WebSocketClient();
         client.getPolicy().setMaxTextMessageSize(4 * 1024 * 1024);
@@ -56,6 +58,31 @@ public class WebPlayTest {
     public void stopServer() throws Exception {
         if (client != null) client.stop();
         if (server != null) server.stop();
+    }
+
+    /** Calls the lobby API; with host, sends the host password. Returns the status and the JSON answer. */
+    private Map.Entry<Integer, JsonElement> api(String method, String path, String body, boolean host) throws Exception {
+        java.net.http.HttpRequest.Builder b = java.net.http.HttpRequest.newBuilder(new URI("http://localhost:" + server.port() + "/api" + path))
+                .method(method, body == null ? java.net.http.HttpRequest.BodyPublishers.noBody() : java.net.http.HttpRequest.BodyPublishers.ofString(body))
+                .header("Content-Type", "application/json");
+        if (host) b.header("X-Host-Password", PASSWORD);
+        java.net.http.HttpResponse<String> r = http.send(b.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+        return Map.entry(r.statusCode(), JsonParser.parseString(r.body()));
+    }
+
+    private JsonObject createGame(String format, String vs, String deckJson) throws Exception {
+        Map.Entry<Integer, JsonElement> r = api("POST", "/games",
+                "{\"format\":\"" + format + "\",\"vs\":\"" + vs + "\",\"name\":\"Bot\"" + (deckJson == null ? "" : ",\"deck\":" + deckJson) + "}", true);
+        assertEquals((int) r.getKey(), 200, r.getValue().toString());
+        return r.getValue().getAsJsonObject();
+    }
+
+    private Bot playSeat(JsonObject seat, long seed) throws Exception {
+        return connect("game=" + seat.get("game").getAsString() + "&seat=" + seat.get("seat").getAsString(), seed);
+    }
+
+    private Bot startGame(String format, long seed) throws Exception {
+        return playSeat(createGame(format, "computer", null), seed);
     }
 
     private Bot connect(String query, long seed) throws Exception {
@@ -358,7 +385,7 @@ public class WebPlayTest {
     private Map<String, Integer> playGames(String format, int games) throws Exception {
         Map<String, Integer> totals = new TreeMap<>();
         for (int g = 0; g < games; g++) {
-            Bot bot = connect("new=" + format + "&name=Bot&password=" + PASSWORD, 1000L * g + format.hashCode());
+            Bot bot = startGame(format, 1000L * g + format.hashCode());
             assertNotNull(bot.joined.get(60, TimeUnit.SECONDS));
             JsonObject end;
             try {
@@ -390,7 +417,7 @@ public class WebPlayTest {
 
     @Test(timeOut = 300_000)
     public void testMomirAvatarMakesACreature() throws Exception {
-        Bot bot = connect("new=MOMIR&name=Bot&password=" + PASSWORD, 3);
+        Bot bot = startGame("MOMIR", 3);
         bot.useAvatar = true;
         assertNotNull(bot.joined.get(60, TimeUnit.SECONDS));
         long until = System.currentTimeMillis() + 180_000;
@@ -404,18 +431,85 @@ public class WebPlayTest {
     }
 
     @Test(timeOut = 120_000)
-    public void testWrongPasswordIsRefused() throws Exception {
-        Bot bot = connect("new=DANDAN&password=nope", 1);
-        String closed = bot.closedWith.get(30, TimeUnit.SECONDS);
-        assertTrue(closed.startsWith("4000"), closed);
+    public void testCreatingGamesAndDecksNeedsTheHostPassword() throws Exception {
+        assertEquals((int) api("POST", "/games", "{\"format\":\"DANDAN\"}", false).getKey(), 403);
+        assertEquals((int) api("GET", "/decks", null, false).getKey(), 403);
+        assertEquals((int) api("PUT", "/decks", "{\"name\":\"x\",\"text\":\"40 Island\"}", false).getKey(), 403);
+        assertFalse(api("GET", "/session", null, false).getValue().getAsJsonObject().get("host").getAsBoolean());
+        assertTrue(api("GET", "/session", null, true).getValue().getAsJsonObject().get("host").getAsBoolean());
+        Bot bot = connect("game=nope&seat=nope", 1);
+        assertTrue(bot.closedWith.get(30, TimeUnit.SECONDS).startsWith("4000"));
         assertFalse(bot.joined.isDone());
+    }
+
+    @Test(timeOut = 900_000)
+    public void testFriendsPlayEachOtherFromAnInviteLink() throws Exception {
+        JsonObject host = createGame("DANDAN", "friend", null);
+        String game = host.get("game").getAsString(), invite = host.get("invite").getAsString();
+        Bot hostBot = playSeat(host, 21);
+        hostBot.passive = true;
+        until(() -> hostBot.seen.containsKey("msg:waiting"), 30_000);
+        assertEquals((int) api("GET", "/games/" + game + "?invite=wrong", null, false).getKey(), 404);
+        JsonObject info = api("GET", "/games/" + game + "?invite=" + invite, null, false).getValue().getAsJsonObject();
+        assertEquals(info.get("host").getAsString(), "Bot");
+
+        // a friend joins without the host password; the invite then can't be used again
+        Map.Entry<Integer, JsonElement> joined = api("POST", "/games/" + game + "/join", "{\"invite\":\"" + invite + "\",\"name\":\"Friend\"}", false);
+        assertEquals((int) joined.getKey(), 200);
+        assertEquals((int) api("POST", "/games/" + game + "/join", "{\"invite\":\"" + invite + "\",\"name\":\"Late\"}", false).getKey(), 404);
+        Bot friendBot = playSeat(joined.getValue().getAsJsonObject(), 22);
+        hostBot.passive = false;
+        hostBot.act();
+
+        JsonObject end;
+        try {
+            end = hostBot.over.get(Integer.getInteger("webplay.gameMinutes", 6), TimeUnit.MINUTES);
+        } catch (java.util.concurrent.TimeoutException e) {
+            throw new AssertionError("the friend game didn't finish" + diagnose(hostBot) + diagnose(friendBot));
+        }
+        assertTrue(end.get("gameOver").getAsBoolean());
+        friendBot.over.get(60, TimeUnit.SECONDS);
+        assertEquals(hostBot.leaks, List.of(), "hidden cards reached the host: " + hostBot.leaks);
+        assertEquals(friendBot.leaks, List.of(), "hidden cards reached the friend: " + friendBot.leaks);
+        assertTrue(hostBot.state.get("you").getAsInt() != friendBot.state.get("you").getAsInt(), "each sees the game as their own seat");
+        System.out.println("WEBPLAY friend game: turn " + end.get("turn") + ", " + end.get("winner") + " won");
+    }
+
+    @Test(timeOut = 300_000)
+    public void testSharedDeckListsAreCheckedSavedAndUsed() throws Exception {
+        JsonObject bad = api("POST", "/decks/check", "{\"text\":\"4 Brainstorm\\n2 Not A Real Card\"}", false).getValue().getAsJsonObject();
+        assertEquals(bad.getAsJsonArray("problems").size(), 1, bad.toString());
+        assertEquals((int) api("PUT", "/decks", "{\"name\":\"Bad\",\"text\":\"2 Not A Real Card\"}", true).getKey(), 400);
+
+        String list = "16 Dandan\\n24 Island";
+        assertEquals((int) api("PUT", "/decks", "{\"name\":\"Forty Fish\",\"text\":\"" + list + "\"}", true).getKey(), 200);
+        JsonElement saved = api("GET", "/decks", null, true).getValue();
+        assertTrue(saved.toString().contains("Forty Fish") && saved.toString().contains("16 Dand"), saved.toString());
+
+        // a DanDan game with it: the shared library starts from its 40 cards, not the standard 80
+        Bot bot = playSeat(createGame("DANDAN", "computer", "{\"kind\":\"saved\",\"name\":\"Forty Fish\"}"), 31);
+        bot.passive = true;
+        until(() -> bot.state != null && bot.state.getAsJsonArray("players").size() == 2, 60_000);
+        int library = bot.state.getAsJsonArray("players").get(0).getAsJsonObject().get("libraryCount").getAsInt();
+        assertTrue(library <= 40 && library > 0, "library of " + library);
+        bot.session.close();
+
+        assertEquals((int) api("DELETE", "/decks?name=Forty%20Fish", null, true).getKey(), 200);
+        assertFalse(api("GET", "/decks", null, true).getValue().toString().contains("Forty Fish"));
+    }
+
+    private static void until(java.util.function.BooleanSupplier condition, long ms) throws InterruptedException {
+        long end = System.currentTimeMillis() + ms;
+        while (!condition.getAsBoolean() && System.currentTimeMillis() < end) Thread.sleep(50);
+        assertTrue(condition.getAsBoolean(), "timed out waiting");
     }
 
     @Test(timeOut = 300_000)
     public void testReconnectingGetsTheGameBack() throws Exception {
-        Bot first = connect("new=DANDAN&name=Phone&password=" + PASSWORD, 7);
+        JsonObject created = createGame("DANDAN", "computer", null);
+        Bot first = playSeat(created, 7);
         first.passive = true; // leave the opening hand undecided, as if the phone went to sleep
-        JsonObject joined = first.joined.get(60, TimeUnit.SECONDS);
+        first.joined.get(60, TimeUnit.SECONDS);
         long until = System.currentTimeMillis() + 60_000;
         // the first decision is a dialog (such as the computer revealing cards) or the mulligan buttons
         while (first.ask == null && first.buttons == null && System.currentTimeMillis() < until) Thread.sleep(50);
@@ -423,7 +517,7 @@ public class WebPlayTest {
         assertTrue(waitingOnDialog || first.buttons != null, "the game asked something");
         first.session.close();
 
-        String game = joined.get("game").getAsString(), seat = joined.get("seat").getAsString();
+        String game = created.get("game").getAsString(), seat = created.get("seat").getAsString();
         Bot wrongSeat = connect("game=" + game + "&seat=not-the-token", 8);
         assertTrue(wrongSeat.closedWith.get(30, TimeUnit.SECONDS).startsWith("4000"));
 

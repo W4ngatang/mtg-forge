@@ -179,7 +179,7 @@ public class WebGuiGame extends AbstractGuiGame {
     public void showPromptMessage(PlayerView playerView, String message, CardView card) {
         JsonObject o = new JsonObject();
         o.addProperty("t", "prompt");
-        o.addProperty("text", message == null ? "" : message);
+        o.addProperty("text", StateJson.plain(message));
         if (card != null && mayView(card)) {
             o.addProperty("card", card.getId());
         }
@@ -337,10 +337,10 @@ public class WebGuiGame extends AbstractGuiGame {
         JsonObject j = new JsonObject();
         if (o instanceof CardView c) {
             boolean visible = mayView(c);
-            j.addProperty("label", visible ? (display != null ? display.apply(o) : c.getName()) : "Hidden card");
+            j.addProperty("label", visible ? StateJson.plain(display != null ? display.apply(o) : c.getName()) : "Hidden card");
             j.add("card", StateJson.card(c, visible));
         } else {
-            j.addProperty("label", display != null ? display.apply(o) : String.valueOf(o));
+            j.addProperty("label", StateJson.plain(display != null ? display.apply(o) : String.valueOf(o)));
             if (o instanceof PlayerView p) {
                 j.addProperty("player", p.getId());
             }

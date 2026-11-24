@@ -1,0 +1,737 @@
+"use strict";
+/* Forge web client: lobby pages and the phone game screen. Talks to /api (lobby) and /ws (games).
+   All text from the server or from players goes into the page as text, never as HTML. */
+
+// ---------- small helpers ----------
+const app = document.getElementById("app");
+
+function h(tag, attrs, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "text") el.textContent = v;
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children.flat(Infinity)) {
+    if (c === null || c === undefined || c === false) continue;
+    el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  return el;
+}
+
+const store = {
+  get(key, fallback) {
+    try { const v = localStorage.getItem("forge." + key); return v === null ? fallback : JSON.parse(v); } catch (e) { return fallback; }
+  },
+  set(key, value) {
+    try { localStorage.setItem("forge." + key, JSON.stringify(value)); } catch (e) { /* private mode: nothing remembered */ }
+  },
+};
+
+function seats() {
+  const all = store.get("seats", {});
+  const weekAgo = Date.now() - 7 * 864e5;
+  for (const [g, s] of Object.entries(all)) if (!s.at || s.at < weekAgo) delete all[g];
+  return all;
+}
+function rememberSeat(game, seat, label) {
+  const all = seats();
+  all[game] = { seat, at: Date.now(), label };
+  store.set("seats", all);
+}
+function forgetSeat(game) {
+  const all = seats();
+  delete all[game];
+  store.set("seats", all);
+}
+
+async function api(method, path, body) {
+  const headers = { "Content-Type": "application/json" };
+  const pw = store.get("password", "");
+  if (pw) headers["X-Host-Password"] = pw;
+  const res = await fetch("/api" + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  let data = {};
+  try { data = await res.json(); } catch (e) { /* empty body */ }
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+let toastTimer;
+function toast(text) {
+  document.querySelectorAll(".toast").forEach(t => t.remove());
+  const t = h("div", { class: "toast", onclick: () => t.remove() }, text);
+  document.body.append(t);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.remove(), 6000);
+}
+
+function go(hash) { location.hash = hash; }
+
+// ---------- routing ----------
+window.addEventListener("hashchange", route);
+function route() {
+  const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+  if (parts[0] !== "play") leaveGame();
+  switch (parts[0]) {
+    case "new": return newGamePage();
+    case "decks": return decksPage();
+    case "deck": return deckEditorPage(parts[1] || "");
+    case "join": return joinPage(parts[1], parts[2]);
+    case "play": return playPage(parts[1]);
+    default: return homePage();
+  }
+}
+
+function page(...children) {
+  app.textContent = "";
+  const p = h("div", { class: "page" }, ...children);
+  app.append(p);
+  window.scrollTo(0, 0);
+  return p;
+}
+function back(label, hash) {
+  return h("div", { class: "top-nav" }, h("button", { class: "btn small", onclick: () => go(hash) }, "‹ " + label));
+}
+
+// ---------- host password ----------
+async function hostReady() {
+  try { return (await api("GET", "/session")).host; } catch (e) { return true; } // can't tell: let the next step say
+}
+function passwordPanel(after) {
+  const input = h("input", { type: "password", placeholder: "Host password", autocomplete: "current-password" });
+  const msg = h("div", { class: "error" });
+  const submit = async () => {
+    store.set("password", input.value);
+    if (await hostReady()) after(); else msg.textContent = "That's not the host password.";
+  };
+  input.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
+  return h("div", { class: "panel stack-v" },
+    h("div", {}, "Enter the host password to start games and manage decks. Friends you invite don't need it."),
+    input, msg, h("button", { class: "btn primary", onclick: submit }, "Continue"));
+}
+
+// ---------- home ----------
+async function homePage() {
+  const p = page(h("h1", {}, "Forge"));
+  if (!(await hostReady())) { p.append(passwordPanel(homePage)); return; }
+  p.append(h("div", { class: "stack-v" },
+    h("button", { class: "btn primary block", onclick: () => go("#/new") }, "New game"),
+    h("button", { class: "btn block", onclick: () => go("#/decks") }, "Shared decks")));
+  const mine = Object.entries(seats()).sort((a, b) => b[1].at - a[1].at);
+  if (mine.length) {
+    p.append(h("h2", {}, "Your games"));
+    const list = h("div", { class: "panel", style: "padding:0" });
+    for (const [game, s] of mine) {
+      list.append(h("div", { class: "list-item", onclick: () => go("#/play/" + encodeURIComponent(game)) },
+        h("span", {}, s.label || "Game"), h("span", { class: "muted" }, "Continue ›")));
+    }
+    p.append(list);
+  }
+}
+
+// ---------- new game ----------
+async function newGamePage() {
+  const p = page(back("Home", "#/"), h("h1", {}, "New game"));
+  if (!(await hostReady())) { p.append(passwordPanel(newGamePage)); return; }
+  let formats = [], decks = [];
+  try { [formats, decks] = await Promise.all([api("GET", "/formats"), api("GET", "/decks")]); }
+  catch (e) { p.append(h("div", { class: "error" }, e.message)); return; }
+
+  const choice = { format: store.get("lastFormat", formats[0].id), vs: store.get("lastVs", "computer"), deck: "standard" };
+  const name = h("input", { type: "text", value: store.get("name", ""), placeholder: "Your name", maxlength: 20 });
+  const paste = h("textarea", { placeholder: "10 Dandân\n20 Island\n…" });
+  const pasteMsg = h("div", { class: "muted" });
+  const savedSelect = h("select", {}, decks.map(d => h("option", { value: d.name }, `${d.name} (${d.cards} cards)`)));
+  const err = h("div", { class: "error" });
+  const body = h("div", { class: "stack-v" });
+
+  function pick(list, key, rerender) {
+    return h("div", { class: "choice" }, list.map(o => h("button", {
+      class: "btn" + (choice[key] === o.id ? " on" : ""),
+      onclick: () => { choice[key] = o.id; rerender(); },
+    }, o.label, o.small ? h("small", {}, o.small) : null)));
+  }
+  function render() {
+    body.textContent = "";
+    const fmt = formats.find(f => f.id === choice.format) || formats[0];
+    choice.format = fmt.id;
+    body.append(h("h2", {}, "Format"),
+      pick(formats.map(f => ({ id: f.id, label: f.label, small: f.description })), "format", render),
+      h("h2", {}, "Opponent"),
+      pick([{ id: "computer", label: "Computer" }, { id: "friend", label: "A friend", small: "You'll get a link to send" }], "vs", render));
+    if (fmt.hostPicksDeck) {
+      const deckOpts = [{ id: "standard", label: "Standard list" }];
+      if (decks.length) deckOpts.push({ id: "saved", label: "A saved deck" });
+      deckOpts.push({ id: "text", label: "Paste a list" });
+      body.append(h("h2", {}, "Shared deck"), pick(deckOpts, "deck", render));
+      if (choice.deck === "saved") body.append(savedSelect);
+      if (choice.deck === "text") body.append(paste, h("div", { class: "row" },
+        h("button", { class: "btn small", onclick: checkPaste }, "Check list"), pasteMsg));
+    }
+    body.append(h("h2", {}, "Your name"), name, err,
+      h("button", { class: "btn primary block", onclick: create }, choice.vs === "friend" ? "Create and get the invite link" : "Start game"));
+  }
+  async function checkPaste() {
+    try {
+      const r = await api("POST", "/decks/check", { text: paste.value });
+      pasteMsg.className = r.problems.length ? "error" : "muted";
+      pasteMsg.textContent = r.problems.length ? r.problems.join("\n") : `${r.cards} cards, all recognised`;
+    } catch (e) { pasteMsg.className = "error"; pasteMsg.textContent = e.message; }
+  }
+  async function create(ev) {
+    err.textContent = "";
+    ev.target.disabled = true;
+    store.set("name", name.value.trim());
+    store.set("lastFormat", choice.format);
+    store.set("lastVs", choice.vs);
+    const deck = choice.deck === "saved" ? { kind: "saved", name: savedSelect.value }
+      : choice.deck === "text" ? { kind: "text", text: paste.value } : { kind: "standard" };
+    try {
+      const r = await api("POST", "/games", { format: choice.format, vs: choice.vs, name: name.value, deck });
+      const fmt = formats.find(f => f.id === choice.format);
+      rememberSeat(r.game, r.seat, `${fmt.label} vs ${choice.vs === "friend" ? "a friend" : "the computer"}`);
+      if (r.invite) store.set("invite." + r.game, r.invite);
+      go("#/play/" + encodeURIComponent(r.game));
+    } catch (e) { err.textContent = e.message; ev.target.disabled = false; }
+  }
+  render();
+  p.append(body);
+}
+
+// ---------- join from an invite ----------
+async function joinPage(game, invite) {
+  const p = page(h("h1", {}, "Join a game"));
+  let info;
+  try { info = await api("GET", `/games/${encodeURIComponent(game)}?invite=${encodeURIComponent(invite)}`); }
+  catch (e) {
+    if (seats()[game]) { go("#/play/" + encodeURIComponent(game)); return; } // already joined on this phone
+    p.append(h("div", { class: "panel" }, e.message)); return;
+  }
+  const name = h("input", { type: "text", value: store.get("name", ""), placeholder: "Your name", maxlength: 20 });
+  const err = h("div", { class: "error" });
+  p.append(h("div", { class: "panel stack-v" },
+    h("div", {}, `${info.host} invited you to a game of ${info.format}.`),
+    h("label", { class: "field" }, "Your name", name), err,
+    h("button", { class: "btn primary", onclick: async ev => {
+      ev.target.disabled = true;
+      store.set("name", name.value.trim());
+      try {
+        const r = await api("POST", `/games/${encodeURIComponent(game)}/join`, { invite, name: name.value });
+        rememberSeat(r.game, r.seat, `${info.format} vs ${info.host}`);
+        go("#/play/" + encodeURIComponent(r.game));
+      } catch (e) { err.textContent = e.message; ev.target.disabled = false; }
+    } }, "Join")));
+}
+
+// ---------- shared decks ----------
+async function decksPage() {
+  const p = page(back("Home", "#/"), h("h1", {}, "Shared decks"));
+  if (!(await hostReady())) { p.append(passwordPanel(decksPage)); return; }
+  p.append(h("div", { class: "muted", style: "margin-bottom:12px" },
+    "Deck lists the host can pick as the shared library in DanDan. Paste a list to import one; copy it to share."));
+  p.append(h("button", { class: "btn primary block", onclick: () => go("#/deck/") }, "New deck"));
+  let decks;
+  try { decks = await api("GET", "/decks"); } catch (e) { p.append(h("div", { class: "error" }, e.message)); return; }
+  if (!decks.length) { p.append(h("p", { class: "muted" }, "No saved decks yet.")); return; }
+  const list = h("div", { class: "panel", style: "padding:0;margin-top:12px" });
+  for (const d of decks) {
+    list.append(h("div", { class: "list-item", onclick: () => go("#/deck/" + encodeURIComponent(d.name)) },
+      h("span", {}, d.name), h("span", { class: "muted" }, `${d.cards} cards ›`)));
+  }
+  p.append(list);
+}
+
+async function deckEditorPage(deckName) {
+  const p = page(back("Decks", "#/decks"), h("h1", {}, deckName ? "Edit deck" : "New deck"));
+  if (!(await hostReady())) { p.append(passwordPanel(() => deckEditorPage(deckName))); return; }
+  let text = "";
+  if (deckName) {
+    try { const d = (await api("GET", "/decks")).find(x => x.name.toLowerCase() === deckName.toLowerCase()); text = d ? d.text : ""; }
+    catch (e) { p.append(h("div", { class: "error" }, e.message)); return; }
+  }
+  const name = h("input", { type: "text", value: deckName, placeholder: "Deck name", maxlength: 40 });
+  const area = h("textarea", { placeholder: "One card per line, count first:\n10 Dandân\n20 Island" });
+  area.value = text;
+  const msg = h("div", { class: "muted" });
+  const show = (ok, t) => { msg.className = ok ? "muted" : "error"; msg.textContent = t; };
+  p.append(h("div", { class: "stack-v" },
+    h("label", { class: "field" }, "Name", name),
+    h("label", { class: "field" }, "Cards", area), msg,
+    h("div", { class: "row wrap" },
+      h("button", { class: "btn", onclick: async () => {
+        try { const r = await api("POST", "/decks/check", { text: area.value }); show(!r.problems.length, r.problems.length ? r.problems.join("\n") : `${r.cards} cards, all recognised`); }
+        catch (e) { show(false, e.message); }
+      } }, "Check"),
+      h("button", { class: "btn", onclick: async () => {
+        try { await navigator.clipboard.writeText(area.value); show(true, "Copied the list."); }
+        catch (e) { area.select(); show(true, "Select all and copy."); }
+      } }, "Copy list"),
+      h("button", { class: "btn primary", onclick: async () => {
+        try {
+          const r = await api("PUT", "/decks", { name: name.value, text: area.value });
+          if (deckName && deckName.toLowerCase() !== r.name.toLowerCase()) await api("DELETE", "/decks?name=" + encodeURIComponent(deckName));
+          go("#/decks");
+        } catch (e) { show(false, e.message); }
+      } }, "Save")),
+    deckName ? h("button", { class: "btn danger", onclick: async () => {
+      if (!confirm(`Delete "${deckName}"?`)) return;
+      try { await api("DELETE", "/decks?name=" + encodeURIComponent(deckName)); go("#/decks"); } catch (e) { show(false, e.message); }
+    } }, "Delete deck") : null));
+}
+
+// =====================================================================================
+// The game
+// =====================================================================================
+const G = {};
+function leaveGame() {
+  if (G.ws) { G.closing = true; G.ws.close(); }
+  for (const k of Object.keys(G)) delete G[k];
+  document.querySelectorAll(".banner,.toast").forEach(b => b.remove());
+}
+
+function playPage(game) {
+  leaveGame();
+  const mine = seats()[game];
+  if (!mine) {
+    page(back("Home", "#/"), h("div", { class: "panel" }, "This browser isn't seated in that game. Open your invite link again, or start a new game."));
+    return;
+  }
+  Object.assign(G, { game, seat: mine.seat, cards: new Map(), failedImages: store.get("noImage", {}), retry: 0, hide: {} });
+  app.textContent = "";
+  app.append(h("div", { class: "page" }, h("p", { class: "muted" }, "Connecting…")));
+  connect();
+}
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws?game=${encodeURIComponent(G.game)}&seat=${encodeURIComponent(G.seat)}`);
+  G.ws = ws;
+  ws.onopen = () => { G.retry = 0; document.querySelectorAll(".banner").forEach(b => b.remove()); };
+  ws.onmessage = e => onMessage(JSON.parse(e.data));
+  ws.onclose = e => {
+    if (G.ws !== ws || G.closing) return;
+    if (e.code === 4000) {
+      forgetSeat(G.game);
+      page(back("Home", "#/"), h("div", { class: "panel" }, e.reason || "That game has ended."));
+      return;
+    }
+    if (G.over) return;
+    if (!document.querySelector(".banner")) document.body.append(h("div", { class: "banner" }, "Reconnecting…"));
+    G.retry = Math.min(G.retry + 1, 5);
+    setTimeout(() => { if (G.ws === ws) connect(); }, 1000 * Math.pow(2, G.retry - 1));
+  };
+}
+document.addEventListener("visibilitychange", () => {
+  // phones drop sockets while asleep; come straight back when the page is visible again
+  if (!document.hidden && G.ws && G.ws.readyState > 1 && !G.over) connect();
+});
+
+function send(o) { if (G.ws && G.ws.readyState === 1) G.ws.send(JSON.stringify(o)); }
+
+function onMessage(m) {
+  switch (m.t) {
+    case "joined": Object.assign(G, { format: m.format, youName: m.you, oppName: m.opponent }); break;
+    case "waiting": G.invite = m.invite; if (!G.state) renderWaiting(); return;
+    case "state":
+      G.state = m;
+      if (m.gameOver) G.over = true;
+      break;
+    case "prompt": G.prompt = m; break;
+    case "buttons": G.buttons = m; break;
+    case "selection": G.selection = m; break;
+    case "ask": G.ask = m; G.askHidden = false; G.askPicks = []; break;
+    case "notice": toast((m.title ? m.title + ": " : "") + m.text); return;
+    case "invalid": {
+      const bar = document.querySelector(".action-bar");
+      if (bar) { bar.classList.remove("shake"); void bar.offsetWidth; bar.classList.add("shake"); }
+      if (navigator.vibrate) navigator.vibrate(60);
+      return;
+    }
+    case "alert": if (navigator.vibrate) navigator.vibrate(30); return;
+    case "error": toast(m.text); return;
+    case "gameOver": G.over = true; forgetSeat(G.game); break;
+    default: return;
+  }
+  if (G.state) scheduleRender();
+}
+
+let renderQueued = false;
+function scheduleRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => { renderQueued = false; if (G.state) renderGame(); });
+}
+
+function renderWaiting() {
+  const link = `${location.origin}${location.pathname}#/join/${encodeURIComponent(G.game)}/${encodeURIComponent(G.invite)}`;
+  const p = page(back("Home", "#/"), h("h1", {}, "Waiting for your friend"));
+  p.append(h("div", { class: "panel stack-v" },
+    h("div", {}, `Send this link to the friend you want to play ${G.format || ""} with. The game starts when they join.`),
+    h("div", { class: "invite-link" }, link),
+    h("div", { class: "row" },
+      navigator.share ? h("button", { class: "btn primary", onclick: () => navigator.share({ title: "Play Forge with me", url: link }).catch(() => {}) }, "Share link") : null,
+      h("button", { class: "btn", onclick: async () => {
+        try { await navigator.clipboard.writeText(link); toast("Link copied."); } catch (e) { toast("Copy the link above."); }
+      } }, "Copy link")),
+    h("div", { class: "muted" }, "Anyone with the link can take the seat, once. Keep this page open, or come back to it from Home.")));
+}
+
+// ---------- reading the state ----------
+function me() { return G.state.players.find(p => p.id === G.state.you); }
+function opp() { return G.state.players.find(p => p.id !== G.state.you); }
+function isTarget(kind, id) {
+  const s = G.selection;
+  if (!s) return false;
+  if (kind === "card") return s.cards.includes(id);
+  return s.targets.some(t => t.kind === kind && t.id === id);
+}
+function isChosen(kind, id) {
+  return !!G.selection && G.selection.chosen.some(t => t.kind === kind && t.id === id);
+}
+function combatRole(id) {
+  for (const c of G.state.combat) {
+    if (c.attacker === id) return "attacking";
+    if (c.blockers.includes(id)) return "blocking";
+  }
+  return null;
+}
+const PHASES = {
+  UNTAP: "Untap", UPKEEP: "Upkeep", DRAW: "Draw", MAIN1: "Main phase", COMBAT_BEGIN: "Beginning of combat",
+  COMBAT_DECLARE_ATTACKERS: "Declare attackers", COMBAT_DECLARE_BLOCKERS: "Declare blockers",
+  COMBAT_FIRST_STRIKE_DAMAGE: "First-strike damage", COMBAT_DAMAGE: "Combat damage", COMBAT_END: "End of combat",
+  MAIN2: "Second main phase", END_OF_TURN: "End step", CLEANUP: "Cleanup",
+};
+
+// ---------- cards ----------
+function imageUrl(c, size) {
+  return `/img?name=${encodeURIComponent(c.name)}${c.img ? "&set=" + encodeURIComponent(c.img) : ""}&size=${size}`;
+}
+function textFace(c) {
+  return h("div", { class: "text-face" },
+    h("b", {}, c.name), h("span", { class: "muted" }, [c.cost, c.type].filter(Boolean).join(" · ")),
+    c.text ? h("span", {}, c.text) : null);
+}
+/** The card's text, with its image laid over it once the image loads; the text stays if it never does. */
+function cardFace(c, size) {
+  if (c.hidden) return null;
+  if (G.failedImages[c.name]) return textFace(c);
+  const img = h("img", { src: imageUrl(c, size), alt: c.name, loading: "lazy", draggable: "false" });
+  img.addEventListener("error", () => {
+    G.failedImages[c.name] = 1;
+    store.set("noImage", G.failedImages);
+    img.remove();
+  });
+  return [textFace(c), img];
+}
+function badges(c) {
+  const out = [];
+  if (c.power !== undefined) out.push(h("span", { class: "badge pt" + (c.damage ? " hurt" : "") }, `${c.power}/${c.toughness}` + (c.damage ? ` (−${c.damage})` : "")));
+  if (c.counters) out.push(h("span", { class: "badge counters" }, Object.entries(c.counters).map(([k, v]) => `${v} ${k}`).join(" ")));
+  const tags = [c.token && "token", c.sick && "sick", c.zoneTag].filter(Boolean);
+  if (tags.length) out.push(h("span", { class: "badge tag" }, tags.join(" · ")));
+  return out;
+}
+
+/** A card element, reused between renders when nothing about it changed, so images don't reload. */
+function cardEl(c, opts = {}) {
+  const role = c.hidden ? null : combatRole(c.id);
+  const classes = ["card",
+    c.hidden && "hidden-card", c.tapped && "tapped", c.sick && "sick", role,
+    !c.hidden && isTarget("card", c.id) && "target", !c.hidden && isChosen("card", c.id) && "chosen",
+    opts.on && "on"].filter(Boolean).join(" ");
+  const key = JSON.stringify([c, classes, opts.size || "small"]);
+  const cacheKey = (opts.cacheTag || "") + c.id;
+  const cached = !opts.noCache && G.cards.get(cacheKey);
+  if (cached && cached.key === key) return cached.el;
+  const el = h("div", { class: classes, "data-id": c.id }, cardFace(c, opts.size || "small"), c.hidden ? null : badges(c), opts.extra || null);
+  attachPress(el, () => (opts.onTap ? opts.onTap(c) : tapCard(c)), () => zoom(c));
+  if (!opts.noCache) G.cards.set(cacheKey, { key, el });
+  return el;
+}
+
+/** Tap acts; a long press (or right click) shows the card large. */
+function attachPress(el, onTap, onLong) {
+  let timer = null, long = false, sx = 0, sy = 0;
+  el.addEventListener("pointerdown", e => {
+    long = false; sx = e.clientX; sy = e.clientY;
+    timer = setTimeout(() => { long = true; onLong(); }, 450);
+  });
+  const cancel = () => { clearTimeout(timer); timer = null; };
+  el.addEventListener("pointermove", e => { if (Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) > 10) cancel(); });
+  el.addEventListener("pointerup", cancel);
+  el.addEventListener("pointercancel", cancel);
+  el.addEventListener("contextmenu", e => { e.preventDefault(); cancel(); long = true; onLong(); });
+  el.addEventListener("click", e => { if (long) { e.preventDefault(); return; } onTap(); });
+}
+
+function tapCard(c) {
+  if (c.hidden) return;
+  send({ t: "card", id: c.id });
+}
+
+function zoom(c) {
+  if (c.hidden) return;
+  const z = h("div", { class: "zoom", onclick: () => z.remove() },
+    h("div", { class: "card" }, cardFace(c, "normal"), badges(c)),
+    h("div", { class: "details" }, [c.name, [c.cost, c.type].filter(Boolean).join(" · "), c.text].filter(Boolean).join("\n")),
+    h("div", { class: "muted" }, "Tap anywhere to close"));
+  document.body.append(z);
+}
+
+// ---------- the board ----------
+function splitBattlefield(p) {
+  const lands = [], others = [];
+  for (const c of p.battlefield) {
+    const isLand = !c.hidden && /\bLand\b/.test(c.type || "") && !/\bCreature\b/.test(c.type || "");
+    (isLand ? lands : others).push(c);
+  }
+  const command = p.command.map(c => Object.assign({}, c, { zoneTag: "command" }));
+  return { lands, others: command.concat(others) };
+}
+
+function fieldEl(p, cls) {
+  const { lands, others } = splitBattlefield(p);
+  return h("div", { class: "field " + cls },
+    h("div", { class: "cards" }, others.map(c => cardEl(c))),
+    h("div", { class: "cards lands" }, lands.map(c => cardEl(c))));
+}
+
+function sameIds(a, b) {
+  return a.length === b.length && a.every((c, i) => c.id === b[i].id);
+}
+
+function playerBar(p, cls) {
+  const st = G.state;
+  const mine = p.id === st.you;
+  const other = mine ? opp() : me();
+  const sharedGy = other && p.graveyard.length && sameIds(p.graveyard, other.graveyard);
+  const sharedLib = G.format === "DanDan";
+  const chips = [];
+  for (const [color, n] of Object.entries(p.mana || {})) {
+    chips.push(h("button", { class: `chip mana mana-${color}`, onclick: e => { e.stopPropagation(); if (mine) send({ t: "mana", color }); } }, `${color} ${n}`));
+  }
+  if (!mine) chips.push(h("span", { class: "chip" }, `Hand ${p.handCount}`));
+  chips.push(h("span", { class: "chip" }, `${sharedLib ? "Shared library" : "Library"} ${p.libraryCount}`));
+  if (p.graveyard.length) chips.push(h("button", { class: "chip", onclick: e => { e.stopPropagation(); zoneSheet(sharedGy ? "Shared graveyard" : `${mine ? "Your" : p.name + "'s"} graveyard`, p.graveyard); } }, `GY ${p.graveyard.length}`));
+  if (p.exile.length) chips.push(h("button", { class: "chip", onclick: e => { e.stopPropagation(); zoneSheet(`${mine ? "Your" : p.name + "'s"} exile`, p.exile); } }, `Exile ${p.exile.length}`));
+  if (mine) chips.push(h("button", { class: "chip", onclick: e => { e.stopPropagation(); menuSheet(); } }, "☰"));
+  const classes = ["player-bar", cls, isTarget("player", p.id) && "target", isChosen("player", p.id) && "chosen"].filter(Boolean).join(" ");
+  return h("div", { class: classes, onclick: () => send({ t: "player", id: p.id }) },
+    st.activePlayer === p.id ? h("span", { class: "turn-dot", title: "Their turn" }) : null,
+    h("span", { class: "name" }, mine ? "You" : p.name),
+    h("span", { class: "life" }, p.life),
+    p.poison ? h("span", { class: "chip" }, `☠ ${p.poison}`) : null,
+    h("div", { class: "chips" }, chips));
+}
+
+function middleEl() {
+  const st = G.state;
+  const whose = st.activePlayer === st.you ? "Your" : (opp() ? opp().name + "'s" : "");
+  return h("div", { class: "middle" },
+    h("span", { class: "phase" }, st.turn ? `T${st.turn} · ${whose} ${(PHASES[st.phase] || st.phase).toLowerCase()}` : "Starting…"),
+    st.stack.map(s => h("button", {
+      class: ["stack-item", isTarget("stack", s.id) && "target", isChosen("stack", s.id) && "chosen"].filter(Boolean).join(" "),
+      onclick: () => send({ t: "stack", id: s.id }),
+    }, s.text)));
+}
+
+/** Forge's priority prompt repeats the turn and phase the strip above already shows; say what to do instead. */
+function promptText() {
+  const text = G.prompt ? G.prompt.text : "";
+  if (!/^Priority:/.test(text)) return text;
+  const st = G.state;
+  if (st.stack.length) return "Respond with an instant or ability, or OK to let it resolve.";
+  return st.activePlayer === st.you ? "Your move: play a card, or OK to pass." : "Play an instant, or OK to pass.";
+}
+
+function actionBar() {
+  const b = G.buttons;
+  const prompt = h("div", { class: "prompt", onclick: e => e.currentTarget.classList.toggle("open") }, promptText());
+  const button = (spec, type, cls) => spec && spec.label
+    ? h("button", { class: "btn " + cls, disabled: !spec.enabled, onclick: () => send({ t: type }) }, spec.label) : null;
+  return h("div", { class: "action-bar" }, prompt,
+    b ? button(b.cancel, "cancel", "") : h("span"),
+    b ? button(b.ok, "ok", "primary") : h("span"));
+}
+
+function renderGame() {
+  const st = G.state;
+  const meP = me(), oppP = opp();
+  if (!meP || !oppP) return;
+  // keep scroll positions across re-renders
+  const scroll = {};
+  document.querySelectorAll("[data-scroll]").forEach(el => { scroll[el.dataset.scroll] = [el.scrollLeft, el.scrollTop]; });
+
+  const hand = h("div", { class: "hand", "data-scroll": "hand" }, meP.hand.map(c => cardEl(c, { size: "small" })));
+  const oppField = fieldEl(oppP, "opp"); oppField.dataset.scroll = "opp";
+  const myField = fieldEl(meP, "me"); myField.dataset.scroll = "me";
+  const game = h("div", { class: "game" },
+    playerBar(oppP, "opp"), oppField, middleEl(), myField, playerBar(meP, "me"), hand, actionBar());
+
+  app.textContent = "";
+  app.append(game);
+  document.querySelectorAll("[data-scroll]").forEach(el => {
+    const s = scroll[el.dataset.scroll];
+    if (s) { el.scrollLeft = s[0]; el.scrollTop = s[1]; }
+  });
+  renderAsk();
+  renderOver();
+}
+
+// ---------- sheets ----------
+function closeSheets() { document.querySelectorAll(".sheet-backdrop").forEach(s => s.remove()); }
+function sheet(content, onBackdrop) {
+  const backdrop = h("div", { class: "sheet-backdrop", onclick: e => { if (e.target === backdrop && onBackdrop) onBackdrop(); } },
+    h("div", { class: "sheet" }, content));
+  document.body.append(backdrop);
+  return backdrop;
+}
+
+function zoneSheet(title, cards) {
+  closeSheets();
+  const s = sheet([h("h3", {}, title), h("div", { class: "grid" }, cards.map(c => cardEl(c, { noCache: true, size: "small", onTap: () => tapCard(c) }))),
+    h("div", { class: "actions" }, h("button", { class: "btn", onclick: () => s.remove() }, "Close"))], () => s.remove());
+}
+
+function menuSheet() {
+  closeSheets();
+  const log = (G.state.log || []).slice().reverse();
+  const s = sheet([
+    h("h3", {}, "Game log"),
+    h("div", {}, log.length ? log.map(l => h("div", { class: "log-line" }, l)) : h("div", { class: "muted" }, "Nothing yet.")),
+    h("div", { class: "actions" },
+      h("button", { class: "btn danger", onclick: () => { if (confirm("Concede this game?")) { send({ t: "concede" }); s.remove(); } } }, "Concede"),
+      h("button", { class: "btn", onclick: () => go("#/") }, "Home"),
+      h("button", { class: "btn", onclick: () => s.remove() }, "Close")),
+  ], () => s.remove());
+}
+
+// ---------- dialogs the engine waits on ----------
+function answer(fields) {
+  send(Object.assign({ t: "answer", id: G.ask.id }, fields));
+  G.ask = null;
+  document.querySelectorAll(".ask-sheet,.ask-pill").forEach(e => e.remove());
+}
+
+function renderAsk() {
+  document.querySelectorAll(".ask-sheet,.ask-pill").forEach(e => e.remove());
+  const q = G.ask;
+  if (!q) return;
+  if (G.askHidden) {
+    const pill = h("button", { class: "btn primary ask-pill", style: "position:fixed;left:12px;right:12px;bottom:calc(84px + var(--safe-bottom));z-index:21",
+      onclick: () => { G.askHidden = false; renderAsk(); } }, "Answer: " + (q.title || q.text || "the game is asking"));
+    document.body.append(pill);
+    return;
+  }
+  const picks = G.askPicks;
+  const head = [h("h3", {}, q.title || "Choose"), (q.text || q.top) ? h("div", { class: "sub" }, [q.text, q.top && q.kind === "order" ? `First pick goes ${q.top.toLowerCase()}.` : ""].filter(Boolean).join("\n")) : null];
+  const body = h("div", {});
+  const actions = h("div", { class: "actions" });
+  const hide = h("button", { class: "btn", onclick: () => { G.askHidden = true; renderAsk(); } }, "See board");
+
+  if (q.reveal) body.append(h("div", { class: "sub" }, q.revealText || "Revealed:"), h("div", { class: "grid" }, q.reveal.map(c => cardEl(c, { noCache: true }))));
+
+  const options = q.options || [];
+  const hasCards = options.some(o => o.card);
+  let filter = "";
+  const list = h("div", {});
+  function optionEl(o, i) {
+    const on = picks.includes(i);
+    const num = q.kind === "order" && on ? h("span", { class: "order-num" }, picks.indexOf(i) + 1) : null;
+    const toggle = () => {
+      if (q.kind === "choose" && q.max === 1) { picks.length = 0; if (!on) picks.push(i); }
+      else if (on) picks.splice(picks.indexOf(i), 1);
+      else if (q.kind === "order" || picks.length < (q.max ?? 1)) picks.push(i);
+      draw();
+    };
+    if (o.card && !o.card.hidden) return cardEl(o.card, { noCache: true, on, onTap: toggle, extra: num });
+    return h("button", { class: "btn opt" + (on ? " on" : ""), onclick: toggle }, (num ? `${picks.indexOf(i) + 1}. ` : "") + o.label);
+  }
+  function draw() {
+    list.textContent = "";
+    const shown = options.map((o, i) => [o, i]).filter(([o]) => !filter || o.label.toLowerCase().includes(filter));
+    const els = shown.map(([o, i]) => optionEl(o, i));
+    list.append(hasCards ? h("div", { class: "grid" }, els) : h("div", {}, els));
+    // "Done" needs a pick; choosing nothing is its own, secondary button so it can't be hit by mistake
+    done.disabled = !(picks.length >= Math.max(1, q.min ?? 1) && picks.length <= (q.max ?? 1));
+    done.textContent = picks.length > 1 || q.kind === "order" ? `Done (${picks.length})` : "Done";
+  }
+  const done = h("button", { class: "btn primary" }, "Done");
+  const none = h("button", { class: "btn", onclick: () => answer(q.kind === "order" ? { order: [] } : { choice: [] }) }, "None");
+
+  switch (q.kind) {
+    case "reveal":
+      body.append(h("div", { class: hasCards ? "grid" : "" }, options.map(o => o.card ? cardEl(o.card, { noCache: true }) : h("div", { class: "log-line" }, o.label))));
+      actions.append(h("button", { class: "btn primary", onclick: () => answer({}) }, "OK"));
+      break;
+    case "option":
+      body.append(options.map((o, i) => h("button", { class: "btn opt", onclick: () => answer({ choice: [i] }) }, o.label)));
+      actions.append(hide);
+      break;
+    case "text": {
+      const input = h("input", { type: q.numeric ? "number" : "text", inputmode: q.numeric ? "numeric" : null, value: q.initial || "" });
+      const ok = () => answer({ value: input.value });
+      input.addEventListener("keydown", e => { if (e.key === "Enter") ok(); });
+      body.append(input);
+      actions.append(hide, h("button", { class: "btn primary", onclick: ok }, "Done"));
+      setTimeout(() => input.focus(), 50);
+      break;
+    }
+    case "amounts": {
+      const amounts = options.map(() => 0);
+      if (q.atLeastOne) amounts.fill(1);
+      const left = h("div", { class: "sub" });
+      const submit = h("button", { class: "btn primary", onclick: () => answer({ amounts }) }, "Done");
+      const rows = options.map((o, i) => {
+        const val = h("b", {}, amounts[i]);
+        const set = d => { amounts[i] = Math.max(q.atLeastOne ? 1 : 0, amounts[i] + d); val.textContent = amounts[i]; update(); };
+        return h("div", { class: "stepper" }, h("span", { class: "label" }, o.label),
+          h("button", { class: "btn", onclick: () => set(-1) }, "−"), val, h("button", { class: "btn", onclick: () => set(1) }, "+"));
+      });
+      function update() {
+        const rest = q.total - amounts.reduce((a, b) => a + b, 0);
+        left.textContent = rest === 0 ? "All assigned." : rest > 0 ? `${rest} left to assign` : `${-rest} too many`;
+        submit.disabled = rest !== 0;
+      }
+      body.append(left, rows);
+      actions.append(hide, submit);
+      update();
+      break;
+    }
+    default: { // choose, order
+      if (options.length > 12) {
+        const search = h("input", { type: "text", placeholder: "Filter…" });
+        search.addEventListener("input", () => { filter = search.value.toLowerCase(); draw(); });
+        body.append(search);
+      }
+      body.append(list);
+      done.onclick = () => answer(q.kind === "order" ? { order: picks.slice() } : { choice: picks.slice() });
+      const reset = h("button", { class: "btn", onclick: () => { picks.length = 0; draw(); } }, "Clear");
+      actions.append(hide, q.min === 0 ? none : reset, done);
+      draw();
+    }
+  }
+  const s = sheet([head, body, actions]);
+  s.classList.add("ask-sheet");
+}
+
+function renderOver() {
+  document.querySelectorAll(".over").forEach(e => e.remove());
+  if (!G.over) return;
+  const st = G.state;
+  const iWon = st.winner && st.winner === (me() && me().name);
+  document.body.append(h("div", { class: "over" },
+    h("h2", {}, st.winner ? (iWon ? "You won!" : `${st.winner} won`) : "Game over"),
+    h("div", { class: "row" },
+      h("button", { class: "btn primary", onclick: () => go("#/new") }, "New game"),
+      h("button", { class: "btn", onclick: () => { document.querySelectorAll(".over").forEach(e => e.remove()); } }, "See board"),
+      h("button", { class: "btn", onclick: () => go("#/") }, "Home"))));
+}
+
+route();

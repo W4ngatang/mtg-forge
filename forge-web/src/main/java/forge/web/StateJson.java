@@ -122,9 +122,13 @@ final class StateJson {
         o.addProperty("id", c.getId());
         o.addProperty("name", s.getName());
         o.addProperty("set", s.getSetCode());
+        String scryfall = scryfallSet(s.getSetCode());
+        if (scryfall != null) {
+            o.addProperty("img", scryfall); // the set code Scryfall's images use, which can differ from Forge's
+        }
         o.addProperty("type", s.getType().toString());
         o.addProperty("cost", s.getManaCost() == null ? "" : s.getManaCost().getSimpleString());
-        o.addProperty("text", c.getText());
+        o.addProperty("text", plain(c.getText()));
         if (s.isCreature()) {
             o.addProperty("power", s.getPower());
             o.addProperty("toughness", s.getToughness());
@@ -147,10 +151,28 @@ final class StateJson {
         return o;
     }
 
+    /** Forge's rules and prompt text can carry HTML for its own screens; the browser gets plain text. */
+    static String plain(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replaceAll("(?i)<br\\s*/?>", "\n").replaceAll("<[^>]*>", "")
+                .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
+                .replace("&amp;", "&").trim();
+    }
+
+    private static String scryfallSet(String forgeCode) {
+        if (forgeCode == null || forgeCode.isEmpty() || forge.StaticData.instance() == null) {
+            return null;
+        }
+        forge.card.CardEdition edition = forge.StaticData.instance().getEditions().get(forgeCode);
+        return edition == null ? null : edition.getScryfallCode();
+    }
+
     private static JsonObject stackItem(StackItemView item, Predicate<CardView> mayView) {
         JsonObject o = new JsonObject();
         o.addProperty("id", item.getId());
-        o.addProperty("text", item.getText());
+        o.addProperty("text", plain(item.getText()));
         if (item.getSourceCard() != null) {
             o.add("source", card(item.getSourceCard(), mayView.test(item.getSourceCard())));
         }

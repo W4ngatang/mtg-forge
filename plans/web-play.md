@@ -2,7 +2,7 @@
 
 **Goal:** a Forge server that friends play in a web browser, on phones first, against each other or the computer.
 
-Status: step 1 (the bridge) done. Next: step 2, the phone screen.
+Status: steps 1–3 done (bridge, phone screen, lobby). Next: step 4, hosting (options below).
 
 ## Decisions
 
@@ -79,13 +79,46 @@ Run it from the repository root (`forge.web.assets` points at the folder that ho
 
 **Decision types seen so far:** choose (one, several or optional), order, reveal, number entry (Momir's X), card, player and stack-item selection, and the mana and OK/Cancel prompts.
 
+## Steps 2 and 3: the phone screen and the lobby (done)
+
+**The app** (`forge-web/src/main/resources/web/`: `index.html`, `app.css`, `app.js`): plain HTML, CSS and JavaScript, no build step.
+
+- **Lobby:**
+  - The host password (asked once, remembered on the phone).
+  - New game: format, opponent (computer or a friend), and for DanDan the shared deck (standard list, a saved list, or a pasted one, checked before the game starts).
+  - A waiting room with the invite link and Share/Copy.
+  - Joining from an invite, which needs no password.
+  - Shared decks: paste to import, Check, Save, Copy list to export, Delete.
+  - "Your games" on the home screen to get back into a game.
+- **Game screen (phone portrait):**
+  - Opponent bar, opponent's battlefield, phase and stack strip, your battlefield, your bar, hand, action bar (prompt, Cancel, OK).
+  - Valid choices glow; chosen ones are green; attackers and blockers are outlined.
+  - Tap to act, long-press to see a card large.
+  - Graveyard and exile open as sheets (DanDan's shown as one shared graveyard).
+  - Mana pool chips, the log, Concede.
+  - Every dialog kind is a bottom sheet with "See board" to peek: choose (cards or labels, with a filter for long lists), option, order, number or text, divide amounts, reveal. Choosing nothing is a separate button from Done, so it can't be tapped by mistake.
+  - Reconnects by itself, including when the phone wakes up.
+- **Card images:** `/img?name=..&set=..` looks each card up on Scryfall once (spaced out, as Scryfall asks) and redirects to Scryfall's image servers. The card's text shows underneath until the image loads, and stays if there's no image.
+
+**The lobby API** (`ApiServlet`): formats, a session check, create game, invite info, join, decks (list, save, delete, check). The host password goes in a header. Running games are capped (12).
+
+**Checks:**
+- `WebPlayTest`:
+  - Random-play games of both formats, and the Momir avatar making a creature.
+  - A friend game between two scripted browsers.
+  - An invite that works once only.
+  - Saved decks: checked, saved, used as the shared library, deleted.
+  - The host password required for creating games and managing decks.
+  - Reconnecting.
+- `forge-web/ui-check/`: Playwright scripts that drive the real app at iPhone size, with screenshots.
+
 ## Steps
 
 | Step | What | Effort |
 |---|---|---|
 | 1. Bridge (**done**) | `forge-web` module, Jetty WebSocket, `WebGuiGame`, a JSON schema for game state, prompts and dialogs. Validate every browser message against what was offered. A scripted client plays whole games over the socket. | 1–2 weeks |
-| 2. Board UI | Phone portrait layout. Battlefield, hands, stack, zones, log, Scryfall images, the prompt bar, then the dialogs. | 3–5 weeks |
-| 3. Lobby | Create a game (format, computer or invite link), paste or choose a deck, saved shared-deck lists on the server, reconnecting. | ~1 week |
+| 2. Board UI (**done**) | Phone portrait layout. Battlefield, hands, stack, zones, log, Scryfall images, the prompt bar, then the dialogs. | 3–5 weeks |
+| 3. Lobby (**done**) | Create a game (format, computer or invite link), paste or choose a deck, saved shared-deck lists on the server, reconnecting. | ~1 week |
 | 4. Deploy | Docker image, a small server or Oracle free tier, Cloudflare Tunnel for HTTPS, host password, basic rate limits. | ~1 week |
 
 That's about 7–9 weeks of focused work. **First milestone:** a complete DanDan game against the computer on a phone, plain-looking, after steps 1–2 (about 4–6 weeks).
@@ -114,6 +147,35 @@ What adding them later involves, about 1–2 weeks:
 - **Priorities:** phone portrait gets the polish first; the wide layouts must work from day one but can look plainer.
 
 Adding computers late would be the expensive path: phone-only layouts usually need reworking to stretch.
+
+## Hosting (step 4): options
+
+What the server needs:
+- Java 17 or newer.
+- About 1.5 GB of memory with the card database loaded, plus some per running game: 2 GB works, 4 GB is comfortable.
+- About 1 GB of disk, mostly Forge's `res` folder.
+- Outbound internet for card images.
+- HTTPS in front, for phones.
+
+| Option | Cost | Good | Watch out for |
+|---|---|---|---|
+| **Hetzner Cloud** (CAX11: 2 ARM cores, 4 GB) | About €4/month | Cheapest reliable server; plenty of room | You run a small Linux server (updates; I can script the setup) |
+| **Fly.io** (shared CPU, 2 GB) | About $10–15/month | No server to look after; HTTPS and a `*.fly.dev` address included; deploys a Docker image | Saved decks need a volume; stopping when idle saves money but adds about 10 s of start-up |
+| **Oracle Cloud free tier** (ARM, up to 4 cores / 24 GB) | Free | Generous | Sign-up can be fiddly; free machines can be reclaimed if idle; capacity varies |
+| **A home computer or Raspberry Pi 5 (8 GB)** + Cloudflare Tunnel | Free (electricity) | No monthly bill; Tunnel gives HTTPS without opening router ports | Only up while that machine is on |
+| DigitalOcean / Linode | About $12–24/month | Familiar | Pricier than Hetzner for the same machine |
+| Render / Railway free tiers, Cloud Run | n/a | | Too little memory, or they stop long-running games |
+
+**HTTPS and an address:**
+- Fly.io includes both.
+- On a server or at home, Cloudflare Tunnel gives HTTPS on your own domain (about $10/year), or a free temporary `trycloudflare.com` address for testing.
+- Alternatively, Caddy on the server gets free certificates automatically.
+
+**Either way, step 4 builds:**
+- a Docker image (the jar plus Forge's `res`, Java 21);
+- the host password from an environment variable;
+- saved decks on a volume;
+- setup notes for the chosen host.
 
 ## Open questions
 

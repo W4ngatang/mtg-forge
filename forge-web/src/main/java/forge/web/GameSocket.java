@@ -14,17 +14,16 @@ import org.eclipse.jetty.websocket.api.annotations.WebSocket;
 import com.google.gson.JsonObject;
 
 /**
- * One browser connection. {@code /ws?new=DANDAN&name=Alex&password=...} starts a game against the
- * computer; {@code /ws?game=ID&seat=TOKEN} reconnects to it. The first message tells the browser
- * the game id and seat token to keep for reconnecting.
+ * One browser playing one seat: {@code /ws?game=ID&seat=TOKEN}, with the seat token from creating
+ * or joining the game (see {@link ApiServlet}). Reconnecting is connecting again with the same token.
+ * The first message, {@code joined}, names the format and players; a friend game nobody has joined
+ * yet then sends {@code waiting} with the invite.
  */
 @WebSocket(maxTextMessageSize = 64 * 1024)
 public class GameSocket {
-    private static final int MAX_NAME = 20;
-
     private final WebServer server;
     private Session session;
-    private GameRoom room;
+    private GameRoom.Seat seat;
     private Consumer<String> sink;
 
     GameSocket(WebServer server) {
@@ -35,50 +34,43 @@ public class GameSocket {
     public void onConnect(Session s) {
         session = s;
         Map<String, List<String>> q = s.getUpgradeRequest().getParameterMap();
-        try {
-            if (q.containsKey("game")) {
-                room = server.room(first(q, "game"));
-                if (room == null || !room.seatToken.equals(first(q, "seat"))) {
-                    close("No such game, or not your seat.");
-                    return;
-                }
-            } else {
-                if (!server.passwordMatches(first(q, "password"))) {
-                    close("Wrong host password.");
-                    return;
-                }
-                WebFormat format = WebFormat.parse(first(q, "new"));
-                if (format == null) {
-                    close("Unknown format.");
-                    return;
-                }
-                room = server.newRoom(format, playerName(first(q, "name")));
-            }
-        } catch (RuntimeException e) {
-            close("Couldn't start the game: " + e.getMessage());
+        GameRoom room = server.room(first(q, "game"));
+        seat = room == null ? null : room.seat(first(q, "seat"));
+        if (seat == null) {
+            close("No such game, or not your seat.");
             return;
         }
         JsonObject joined = new JsonObject();
         joined.addProperty("t", "joined");
         joined.addProperty("game", room.id);
-        joined.addProperty("seat", room.seatToken);
         joined.addProperty("format", room.format.label);
+        joined.addProperty("you", seat.name);
+        String opponent = room.opponentName(seat);
+        if (opponent != null) {
+            joined.addProperty("opponent", opponent);
+        }
         sendNow(joined.toString());
+        if (!room.isStarted() && room.invite() != null) {
+            JsonObject waiting = new JsonObject();
+            waiting.addProperty("t", "waiting");
+            waiting.addProperty("invite", room.invite());
+            sendNow(waiting.toString());
+        }
         sink = this::sendNow;
-        room.seat.attach(sink);
+        seat.gui.attach(sink);
     }
 
     @OnWebSocketMessage
     public void onMessage(String text) {
-        if (room != null) {
-            room.seat.receive(text);
+        if (seat != null) {
+            seat.gui.receive(text);
         }
     }
 
     @OnWebSocketClose
     public void onClose(int status, String reason) {
-        if (room != null && sink != null) {
-            room.seat.detach(sink);
+        if (seat != null && sink != null) {
+            seat.gui.detach(sink);
         }
     }
 
@@ -105,13 +97,5 @@ public class GameSocket {
     private static String first(Map<String, List<String>> q, String key) {
         List<String> v = q.get(key);
         return v == null || v.isEmpty() ? null : v.get(0);
-    }
-
-    private static String playerName(String raw) {
-        String name = raw == null ? "" : raw.replaceAll("[^\\p{L}\\p{N} _-]", "").trim();
-        if (name.length() > MAX_NAME) {
-            name = name.substring(0, MAX_NAME);
-        }
-        return name.isEmpty() ? "Player" : name;
     }
 }
