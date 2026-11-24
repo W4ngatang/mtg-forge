@@ -1,6 +1,6 @@
 # Fly.io settings for the Forge web server. Deploy with forge-web/deploy/deploy.sh.
-app = "APP-NAME"
-primary_region = "REGION"
+app = "f0rgetang"
+primary_region = "ord"
 
 [build]
   dockerfile = "Dockerfile"
@@ -8,11 +8,13 @@ primary_region = "REGION"
 [http_service]
   internal_port = 8080
   force_https = true
-  # Games live in this machine's memory: keep exactly one running, never stopped while idle,
-  # or a friend game waiting on its invite would be lost.
-  auto_stop_machines = "off"
+  # On demand while testing: the machine stops a few minutes after the last connection closes
+  # and starts again (about 20 s) on the next visit. Games live in memory, so a stop drops them.
+  # For always on: auto_stop_machines = "off" and min_machines_running = 1.
+  # Either way, keep exactly one machine: a second would split players across servers.
+  auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
 
   [http_service.concurrency]
     type = "connections"
