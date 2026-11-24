@@ -805,11 +805,18 @@ public class GameAction {
             c.moveMergedToSubgame(cause);
         }
 
-        c = changeZone(zoneFrom, zoneTo, c, position, cause, params);
-
-        // A card leaving a shared zone (DanDan) now belongs to the player who received it
+        // A card leaving a shared zone (DanDan) belongs to the player who receives it. Hand it over
+        // before the move, so the move's own events and triggers already see the new owner.
+        Player newOwner = null;
         if (zoneFrom instanceof PlayerZone from && from.isShared() && !(zoneTo instanceof PlayerZone to && to.isShared())) {
-            c.setOwner(zoneTo instanceof PlayerZone to ? to.getPlayer() : c.getController());
+            newOwner = zoneTo instanceof PlayerZone to ? to.getPlayer()
+                    : cause != null && cause.getActivatingPlayer() != null ? cause.getActivatingPlayer() : c.getController();
+            c.setOwner(newOwner);
+        }
+
+        c = changeZone(zoneFrom, zoneTo, c, position, cause, params);
+        if (newOwner != null) {
+            c.setOwner(newOwner); // the move may have made a new card object
         }
 
         // need to refresh ability text for affected cards

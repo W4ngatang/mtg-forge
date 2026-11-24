@@ -224,4 +224,30 @@ public class DanDanTest extends AITest {
 
         assertEquals(countCards(tokens, "Dandân"), 10);
     }
+
+    @Test(timeOut = 300000)
+    public void testCardsInHandBelongToTheirHolderThroughoutAnAiGame() {
+        List<RegisteredPlayer> players = Lists.newArrayList();
+        players.add(new RegisteredPlayer(DanDanDeck.build(null)).setPlayer(new LobbyPlayerAi("p1", null)));
+        players.add(new RegisteredPlayer(DanDanDeck.build(null)).setPlayer(new LobbyPlayerAi("p2", null)));
+        Match match = new Match(danDanRules(), players, "Test");
+        Game game = match.createGame();
+        List<String> wrong = new java.util.ArrayList<>();
+        game.subscribeToEvents(new Object() {
+            @com.google.common.eventbus.Subscribe
+            public void onEvent(forge.game.event.GameEvent ev) {
+                for (Player p : game.getRegisteredPlayers()) {
+                    for (Card c : p.getCardsIn(ZoneType.Hand)) {
+                        if (c.getOwner() != p || c.getController() != p) {
+                            wrong.add(c + " in " + p + "'s hand, owner " + c.getOwner() + ", controller " + c.getController() + " after " + ev);
+                        }
+                    }
+                }
+            }
+        });
+
+        match.startGame(game);
+
+        assertTrue(wrong.isEmpty(), wrong.stream().limit(5).toList().toString());
+    }
 }
