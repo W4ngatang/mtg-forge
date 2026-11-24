@@ -117,5 +117,7 @@ Adding computers late would be the expensive path: phone-only layouts usually ne
 
 ## Open questions
 
+- **Concede occasionally doesn't end a game.** Once on CI (Java 17), a concede sent right after Momir's avatar made a creature didn't end the game within 60 seconds. Not reproduced locally (several runs, including on 2 cores); conceding in the reconnect test works on both Java versions. Look at how `PlayerControllerHuman.concede` races with the game thread when the click comes from another thread.
+
 - Card images: link to Scryfall directly (simplest) or keep a server-side cache (faster, works if Scryfall is slow).
 - Game timers and what happens when a friend's phone sleeps mid-game (reconnecting is planned; an AI takeover after a timeout is possible).
