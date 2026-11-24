@@ -618,7 +618,10 @@ public class WebGuiGame extends AbstractGuiGame {
                 case "ok" -> controller.selectButtonOk();
                 case "cancel" -> controller.selectButtonCancel();
                 case "card" -> {
-                    CardView card = game.getTracker().getObj(TrackableTypes.CardViewType, m.get("id").getAsInt());
+                    CardView card = offered(m.get("id").getAsInt());
+                    if (card == null) {
+                        card = game.getTracker().getObj(TrackableTypes.CardViewType, m.get("id").getAsInt());
+                    }
                     if (card == null || !mayView(card)) {
                         error("No such card.");
                     } else {
@@ -634,7 +637,10 @@ public class WebGuiGame extends AbstractGuiGame {
                     }
                 }
                 case "stack" -> {
-                    StackItemView item = game.getTracker().getObj(TrackableTypes.StackItemViewType, m.get("id").getAsInt());
+                    int id = m.get("id").getAsInt();
+                    StackItemView item = getSelection().targets().stream()
+                            .filter(t -> t instanceof StackItemView && t.getId() == id).map(t -> (StackItemView) t).findFirst()
+                            .orElseGet(() -> game.getTracker().getObj(TrackableTypes.StackItemViewType, id));
                     if (item == null) {
                         error("No such spell or ability.");
                     } else {
@@ -658,6 +664,20 @@ public class WebGuiGame extends AbstractGuiGame {
         } catch (RuntimeException e) {
             error("Couldn't do that: " + e.getMessage());
         }
+    }
+
+    /**
+     * The card the current prompt offered with this id, as the engine offered it. Targets are not
+     * always the objects the game's card registry holds (a spell on the stack, say), and the engine
+     * matches clicks against what it offered.
+     */
+    private CardView offered(int id) {
+        for (CardView c : getSelection().cards()) {
+            if (c.getId() == id && mayView(c)) {
+                return c;
+            }
+        }
+        return null;
     }
 
     private void answer(JsonObject m) {
