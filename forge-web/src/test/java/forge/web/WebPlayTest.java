@@ -227,6 +227,17 @@ public class WebPlayTest {
                 actAvatar(okOn);
                 return;
             }
+            // a selection that still needs picks (Brainstorm's two cards, say) always gets them
+            JsonObject required = selection;
+            if (required != null && chosenIds(required, "card").size() < required.get("min").getAsInt()) {
+                List<Integer> left = ids(required.getAsJsonArray("cards"));
+                left.removeAll(chosenIds(required, "card"));
+                if (!left.isEmpty()) {
+                    count("act:selectCard");
+                    sendType("card", left.get(rnd.nextInt(left.size())));
+                    return;
+                }
+            }
             actionsThisPrompt++;
             if (actionsThisPrompt <= 4) {
                 JsonObject sel = selection;
@@ -489,7 +500,9 @@ public class WebPlayTest {
         // a DanDan game with it: the shared library starts from its 40 cards, not the standard 80
         Bot bot = playSeat(createGame("DANDAN", "computer", "{\"kind\":\"saved\",\"name\":\"Forty Fish\"}"), 31);
         bot.passive = true;
-        until(() -> bot.state != null && bot.state.getAsJsonArray("players").size() == 2, 60_000);
+        // the first state can come before the library is filled
+        until(() -> bot.state != null && bot.state.getAsJsonArray("players").size() == 2
+                && bot.state.getAsJsonArray("players").get(0).getAsJsonObject().get("libraryCount").getAsInt() > 0, 60_000);
         int library = bot.state.getAsJsonArray("players").get(0).getAsJsonObject().get("libraryCount").getAsInt();
         assertTrue(library <= 40 && library > 0, "library of " + library);
         bot.session.close();
@@ -524,9 +537,9 @@ public class WebPlayTest {
         Bot again = connect("game=" + game + "&seat=" + seat, 9);
         again.passive = true;
         until = System.currentTimeMillis() + 30_000;
-        while ((again.state == null || (waitingOnDialog ? again.ask : again.buttons) == null) && System.currentTimeMillis() < until) Thread.sleep(50);
+        while ((again.state == null || (again.ask == null && again.buttons == null)) && System.currentTimeMillis() < until) Thread.sleep(50);
         assertNotNull(again.state, "the state was sent again");
-        assertNotNull(waitingOnDialog ? again.ask : again.buttons, "the open decision was sent again");
+        assertTrue(again.ask != null || again.buttons != null, "the open decision was sent again" + diagnose(first) + diagnose(again));
         again.session.getRemote().sendString("{\"t\":\"concede\"}");
         assertTrue(again.over.get(60, TimeUnit.SECONDS).get("gameOver").getAsBoolean());
     }

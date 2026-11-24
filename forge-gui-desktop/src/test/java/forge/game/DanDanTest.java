@@ -89,6 +89,11 @@ public class DanDanTest extends AITest {
         assertTrue(p2.getZone(ZoneType.Hand).contains(island));
         assertSame(island.getOwner(), p2);
         assertTrue(p1.getZone(ZoneType.Library).isEmpty());
+        // what screens see: the drawn card's view must also be the drawer's, or it's hidden from them
+        assertSame(island.getView().getController(), p2.getView());
+        assertSame(island.getView().getOwner(), p2.getView());
+        assertTrue(island.getView().canBeShownTo(p2.getView()));
+        assertFalse(island.getView().canBeShownTo(p1.getView()));
     }
 
     @Test
