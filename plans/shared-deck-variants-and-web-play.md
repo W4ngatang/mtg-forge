@@ -50,6 +50,10 @@ Throwaway code: start a game where both players use one library object and one g
 
 > **Milestone 2:** you design new shared-deck variants and test them against the AI without changing Java.
 
+> **Status:** A1–A4 are done (DanDan, shared-deck building in the deck editor, the Android test build). A5 and A6 are not started.
+
+> **Tracks B and C below are superseded by [web-play.md](web-play.md):** limiting web play to 1v1 formats lets one server process run games directly, without Forge's lobby or a separate gateway.
+
 ## Track B: the headless server
 
 ### B1. Fill in `Main server` (medium)
