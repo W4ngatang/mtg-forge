@@ -2,7 +2,7 @@
 
 **Goal:** a Forge server that friends play in a web browser, on phones first, against each other or the computer.
 
-Status: planning done, the step 0 spike done, building not started.
+Status: step 1 (the bridge) done. Next: step 2, the phone screen.
 
 ## Decisions
 
@@ -43,11 +43,47 @@ The card pool decides which dialogs come up:
 - **Result:** 5 DanDan and 5 Momir games ran to completion. The architecture works without a desktop GUI or Forge's lobby.
 - **Limit:** the stand-in only clicks OK or the first valid choice, so it never casts spells and saw few dialog types. Step 1 extends it to play cards, and it becomes the per-format coverage check.
 
+## Step 1: the bridge (done)
+
+The `forge-web` module (`forge-web/src/main/java/forge/web/`):
+
+| File | What it does |
+|---|---|
+| `WebServer` | Jetty: serves `/web` from the classpath and games over `/ws`. The host password comes from `FORGE_WEB_PASSWORD`. |
+| `GameSocket` | One browser connection. `/ws?new=DANDAN&name=..&password=..` starts a game against the computer. `/ws?game=ID&seat=TOKEN` reconnects. |
+| `GameRoom` | One game: a `HostedMatch` with a browser seat and a computer seat. The seat token is random and unguessable. |
+| `WebGuiGame` | The seat's screen. Engine calls become JSON messages, and browser messages become controller calls, checked against what the player may see and what was offered. |
+| `StateJson` | The game state as the seat may see it. Opponent hands and libraries are counts only. |
+| `WebFormat` | The format list (DanDan, Momir Basic). |
+| `resources/web/index.html` | A plain debug page that can play a whole game; not the real phone screen. |
+
+**Run it locally:**
+
+```
+mvn -pl forge-web -am install -DskipTests
+FORGE_WEB_PASSWORD=choose-one java -Dforge.web.assets=forge-gui/ -jar forge-web/target/forge-web-*-jar-with-dependencies.jar 8080
+```
+
+Run it from the repository root (`forge.web.assets` points at the folder that holds `res/`). Then open `http://localhost:8080/`, pick a format, and enter the password.
+
+**Tests:** `WebPlayTest` plays whole games through the real socket with a scripted browser that casts spells, uses abilities and answers every dialog with a random valid choice:
+- 4 DanDan and 4 Momir games, checking every state message for hidden cards and that Momir's avatar makes creatures.
+- A wrong host password, and reconnecting to an open prompt or dialog.
+
+**What it caught:**
+- A browser click can open a dialog (choosing which ability to play), so clicks must not run on the socket's reader thread: the dialog's answer could never arrive. Clicks run on a per-seat thread; answers are handled on the socket thread.
+- A card with one playable ability plays it straight away, as Forge's own screens do. A one-item menu made Momir's avatar impossible to use for the scripted player and would cost a tap on every play.
+- `getChoices` with a maximum of −1 means "show these cards", for example the computer revealing cards it can't play well. It's now a `reveal` dialog.
+- Conceding while the engine waits on a dialog releases it.
+- A real DanDan bug, now fixed in the engine: a card drawn from the shared library changed owner only after the move, so the move's own events (and the server's state snapshot) still showed the old owner. That leaked a card in the computer's hand to the browser. Ownership now changes before the move.
+
+**Decision types seen so far:** choose (one, several or optional), order, reveal, number entry (Momir's X), card, player and stack-item selection, and the mana and OK/Cancel prompts.
+
 ## Steps
 
 | Step | What | Effort |
 |---|---|---|
-| 1. Bridge | `forge-web` module, Jetty WebSocket, `WebGuiGame`, a JSON schema for game state, prompts and dialogs. Validate every browser message against what was offered. A scripted client plays whole games over the socket. | 1–2 weeks |
+| 1. Bridge (**done**) | `forge-web` module, Jetty WebSocket, `WebGuiGame`, a JSON schema for game state, prompts and dialogs. Validate every browser message against what was offered. A scripted client plays whole games over the socket. | 1–2 weeks |
 | 2. Board UI | Phone portrait layout. Battlefield, hands, stack, zones, log, Scryfall images, the prompt bar, then the dialogs. | 3–5 weeks |
 | 3. Lobby | Create a game (format, computer or invite link), paste or choose a deck, saved shared-deck lists on the server, reconnecting. | ~1 week |
 | 4. Deploy | Docker image, a small server or Oracle free tier, Cloudflare Tunnel for HTTPS, host password, basic rate limits. | ~1 week |
