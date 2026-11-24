@@ -76,6 +76,9 @@ public class WebPlayTest {
         final List<String> leaks = Collections.synchronizedList(new ArrayList<>());
         final java.util.Deque<String> recent = new java.util.ArrayDeque<>();
         volatile boolean passive;
+        /** Instead of playing randomly: use the command zone's ability (Momir's avatar) each turn, never cancel. */
+        volatile boolean useAvatar;
+        int avatarTriedOnTurn = -1;
         volatile Session session;
         volatile JsonObject state, selection, buttons, ask;
         volatile int actionsThisPrompt;
@@ -181,6 +184,10 @@ public class WebPlayTest {
             if (b == null) return;
             boolean okOn = b.getAsJsonObject("ok").get("enabled").getAsBoolean();
             boolean cancelOn = b.getAsJsonObject("cancel").get("enabled").getAsBoolean();
+            if (useAvatar) {
+                actAvatar(okOn);
+                return;
+            }
             actionsThisPrompt++;
             if (actionsThisPrompt <= 4) {
                 JsonObject sel = selection;
@@ -223,6 +230,34 @@ public class WebPlayTest {
             } else if (cancelOn) {
                 count("act:cancel");
                 sendType("cancel", null);
+            }
+        }
+
+        /** Activate the avatar in my main phase, then go along with whatever the activation asks. */
+        void actAvatar(boolean okOn) {
+            JsonObject s = state;
+            JsonObject sel = selection;
+            if (sel != null) {
+                List<Integer> cards = ids(sel.getAsJsonArray("cards"));
+                cards.removeAll(chosenIds(sel, "card"));
+                if (!cards.isEmpty() && chosenIds(sel, "card").size() < Math.max(1, sel.get("min").getAsInt())) {
+                    count("act:selectCard");
+                    sendType("card", cards.get(0));
+                    return;
+                }
+            }
+            boolean myMain = s != null && s.get("activePlayer").getAsInt() == s.get("you").getAsInt()
+                    && s.get("phase").getAsString().startsWith("MAIN") && s.getAsJsonArray("stack").isEmpty();
+            List<Integer> avatar = myCards("command");
+            if (myMain && !avatar.isEmpty() && avatarTriedOnTurn != s.get("turn").getAsInt()) {
+                avatarTriedOnTurn = s.get("turn").getAsInt();
+                count("act:abilityCard");
+                sendType("card", avatar.get(0));
+                return;
+            }
+            if (okOn) {
+                count("act:ok");
+                sendType("ok", null);
             }
         }
 
@@ -277,10 +312,10 @@ public class WebPlayTest {
                 default -> {
                     int min = q.has("min") ? q.get("min").getAsInt() : 1;
                     int max = q.has("max") ? q.get("max").getAsInt() : 1;
-                    int k = kind.equals("order") ? max : min + rnd.nextInt(Math.max(1, max - min + 1));
+                    int k = kind.equals("order") ? max : useAvatar ? Math.max(min, Math.min(1, max)) : min + rnd.nextInt(Math.max(1, max - min + 1));
                     List<Integer> order = new ArrayList<>();
                     for (int i = 0; i < n; i++) order.add(i);
-                    Collections.shuffle(order, rnd);
+                    if (!useAvatar) Collections.shuffle(order, rnd);
                     JsonArray arr = new JsonArray();
                     order.subList(0, Math.min(k, n)).forEach(arr::add);
                     a.add(kind.equals("order") ? "order" : "choice", arr);
@@ -337,8 +372,21 @@ public class WebPlayTest {
 
     @Test(timeOut = 1_200_000)
     public void testMomirGamesPlayThroughTheSocket() throws Exception {
-        Map<String, Integer> seen = playGames("MOMIR", 4);
-        assertTrue(seen.getOrDefault("state:ownToken", 0) > 0, "the scripted player made a creature with Momir's avatar");
+        playGames("MOMIR", 4);
+    }
+
+    @Test(timeOut = 300_000)
+    public void testMomirAvatarMakesACreature() throws Exception {
+        Bot bot = connect("new=MOMIR&name=Bot&password=" + PASSWORD, 3);
+        bot.useAvatar = true;
+        assertNotNull(bot.joined.get(60, TimeUnit.SECONDS));
+        long until = System.currentTimeMillis() + 180_000;
+        while (bot.seen.getOrDefault("state:ownToken", 0) == 0 && !bot.over.isDone() && System.currentTimeMillis() < until) {
+            Thread.sleep(100);
+        }
+        assertTrue(bot.seen.getOrDefault("state:ownToken", 0) > 0, "Momir's avatar made a creature" + diagnose(bot));
+        bot.session.getRemote().sendString("{\"t\":\"concede\"}");
+        bot.over.get(60, TimeUnit.SECONDS);
     }
 
     @Test(timeOut = 120_000)
