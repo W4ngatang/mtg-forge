@@ -2,7 +2,7 @@
 
 **Goal:** a Forge server that friends play in a web browser, on phones first, against each other or the computer.
 
-Status: steps 1–3 done (bridge, phone screen, lobby). Next: step 4, hosting (options below).
+Status: steps 1–3 done (bridge, phone screen, lobby). Step 4: hosting on Fly.io (below); the deploy files are ready, the app is not created yet.
 
 ## Decisions
 
@@ -148,7 +148,19 @@ What adding them later involves, about 1–2 weeks:
 
 Adding computers late would be the expensive path: phone-only layouts usually need reworking to stretch.
 
-## Hosting (step 4): options
+## Hosting (step 4): Fly.io
+
+**Chosen: Fly.io.** Changes are redeployed from a Claude session (the session has `FLY_API_TOKEN`); see `CLAUDE.md`.
+
+- `forge-web/deploy/deploy.sh` builds the server, stages the jar with the part of `forge-gui/res` the server uses (about 85 MB, card scripts zipped), and runs `flyctl deploy --remote-only`. `--stage` stops after staging.
+- `forge-web/deploy/Dockerfile`: Java 21, the host password from the `FORGE_WEB_PASSWORD` secret, saved decks on the volume at `/data`.
+- `forge-web/deploy/fly.toml`: one always-on `shared-cpu-1x` machine with 2 GB, a 1 GB volume `forge_data`, a health check on `/api/formats`.
+- Memory: the staged server used about 950 MB with three games running, so 1 GB machines are too small.
+- One machine only: games live in memory, so a second machine would split players, and stopping when idle would drop games.
+
+One-time setup: `flyctl apps create <name>`, `flyctl volumes create forge_data --size 1 --region <region> -a <name>`, `flyctl secrets set FORGE_WEB_PASSWORD=… -a <name>`, then put the name and region in `fly.toml` and run `deploy.sh`.
+
+### Options considered
 
 What the server needs:
 - Java 17 or newer.
