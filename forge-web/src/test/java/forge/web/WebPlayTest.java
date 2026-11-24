@@ -133,8 +133,20 @@ public class WebPlayTest {
                         }
                     }
                 }
-                if (p.get("id").getAsInt() != you && p.getAsJsonArray("hand").size() > 0) {
-                    leaks.add("you=" + you + ", opponent " + p.get("id") + " hand: " + p.get("hand") + " | last log: " + lastLog(s));
+                // A card in someone's hand is theirs. One shown under another player's control is shown
+                // for the wrong reason (how the DanDan ownership bug leaked); an opponent's card shown
+                // as theirs has been revealed, which Forge allows, so it's only counted.
+                if (p.get("id").getAsInt() != you && p.get("handCount").getAsInt() > p.getAsJsonArray("hand").size()) {
+                    count("state:opponentHandHidden");
+                }
+                for (JsonElement c : p.getAsJsonArray("hand")) {
+                    JsonObject card = c.getAsJsonObject();
+                    if (card.has("controller") && card.get("controller").getAsInt() != p.get("id").getAsInt()) {
+                        leaks.add("you=" + you + ", " + p.get("id") + "'s hand shows a card controlled by " + card.get("controller")
+                                + ": " + card + " | last log: " + lastLog(s));
+                    } else if (p.get("id").getAsInt() != you) {
+                        count("state:revealedOpponentHandCard");
+                    }
                 }
                 for (String zone : List.of("battlefield", "graveyard", "exile", "command", "hand")) {
                     for (JsonElement c : p.getAsJsonArray(zone)) {
@@ -361,6 +373,7 @@ public class WebPlayTest {
             bot.session.close();
         }
         System.out.println("WEBPLAY " + format + " over " + games + " games: " + totals);
+        assertTrue(totals.getOrDefault("state:opponentHandHidden", 0) > 0, "the opponent's hand was kept hidden");
         return totals;
     }
 
