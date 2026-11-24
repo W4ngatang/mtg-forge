@@ -145,6 +145,8 @@ public abstract class AbstractPreferences<T extends Enum<T> & IPreferences.IPref
             result.add(GameType.MoJhoSto);
         else if (gameType.equals("DanDan"))
             result.add(GameType.DanDan);
+        else if (gameType.equals("Basic Land Game"))
+            result.add(GameType.BasicLandGame);
         else if (gameType.equals("Commander"))
             result.add(GameType.Commander);
         else if (gameType.equals("Oathbreaker"))

@@ -8,7 +8,7 @@ Status: steps 1–3 done (bridge, phone screen, lobby). Next: step 4, hosting (o
 
 | Question | Decision |
 |---|---|
-| Formats | 1v1 only. Start with **DanDan** and **Momir Basic**; more formats will follow soon, so adding one must be cheap. |
+| Formats | 1v1 only: **DanDan**, **Momir Basic** and the **Basic Land Game**. More will follow, so adding one must be cheap. |
 | Opponents | Friends and the computer. |
 | Screens | **Phones only for now** (portrait). Tablets and computers come later; see below for how to keep that cheap. |
 | Access | **Invite links + host password**, no VPN. Cloudflare Access can be added later (see below). |

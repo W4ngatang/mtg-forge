@@ -426,6 +426,12 @@ public class WebPlayTest {
         playGames("MOMIR", 4);
     }
 
+    @Test(timeOut = 1_200_000)
+    public void testBasicLandGamesPlayThroughTheSocket() throws Exception {
+        Map<String, Integer> seen = playGames("BASIC_LAND_GAME", 4);
+        assertTrue(seen.getOrDefault("act:handCard", 0) > 0, "the scripted player played lands");
+    }
+
     @Test(timeOut = 300_000)
     public void testMomirAvatarMakesACreature() throws Exception {
         Bot bot = startGame("MOMIR", 3);

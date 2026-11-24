@@ -287,6 +287,7 @@ public abstract class GameLobby implements IHasGameType {
             data.appliedVariants.remove(GameType.MomirBasic);
             data.appliedVariants.remove(GameType.MoJhoSto);
             data.appliedVariants.remove(GameType.DanDan);
+            data.appliedVariants.remove(GameType.BasicLandGame);
             break;
         case Oathbreaker:
             data.appliedVariants.remove(GameType.Commander);
@@ -295,6 +296,7 @@ public abstract class GameLobby implements IHasGameType {
             data.appliedVariants.remove(GameType.MomirBasic);
             data.appliedVariants.remove(GameType.MoJhoSto);
             data.appliedVariants.remove(GameType.DanDan);
+            data.appliedVariants.remove(GameType.BasicLandGame);
             break;
         case TinyLeaders:
             data.appliedVariants.remove(GameType.Commander);
@@ -303,6 +305,7 @@ public abstract class GameLobby implements IHasGameType {
             data.appliedVariants.remove(GameType.MomirBasic);
             data.appliedVariants.remove(GameType.MoJhoSto);
             data.appliedVariants.remove(GameType.DanDan);
+            data.appliedVariants.remove(GameType.BasicLandGame);
             break;
         case Brawl:
             data.appliedVariants.remove(GameType.Commander);
@@ -311,11 +314,14 @@ public abstract class GameLobby implements IHasGameType {
             data.appliedVariants.remove(GameType.MomirBasic);
             data.appliedVariants.remove(GameType.MoJhoSto);
             data.appliedVariants.remove(GameType.DanDan);
+            data.appliedVariants.remove(GameType.BasicLandGame);
             break;
         case Vanguard:
             data.appliedVariants.remove(GameType.MomirBasic);
             data.appliedVariants.remove(GameType.MoJhoSto);
+            data.appliedVariants.remove(GameType.BasicLandGame);
             data.appliedVariants.remove(GameType.DanDan);
+            data.appliedVariants.remove(GameType.BasicLandGame);
             break;
         case MomirBasic:
             data.appliedVariants.remove(GameType.Commander);
@@ -325,6 +331,7 @@ public abstract class GameLobby implements IHasGameType {
             data.appliedVariants.remove(GameType.Vanguard);
             data.appliedVariants.remove(GameType.MoJhoSto);
             data.appliedVariants.remove(GameType.DanDan);
+            data.appliedVariants.remove(GameType.BasicLandGame);
             break;
         case MoJhoSto:
             data.appliedVariants.remove(GameType.Commander);
@@ -334,6 +341,7 @@ public abstract class GameLobby implements IHasGameType {
             data.appliedVariants.remove(GameType.Vanguard);
             data.appliedVariants.remove(GameType.MomirBasic);
             data.appliedVariants.remove(GameType.DanDan);
+            data.appliedVariants.remove(GameType.BasicLandGame);
             break;
         case DanDan:
             data.appliedVariants.remove(GameType.Commander);
@@ -343,6 +351,17 @@ public abstract class GameLobby implements IHasGameType {
             data.appliedVariants.remove(GameType.Vanguard);
             data.appliedVariants.remove(GameType.MomirBasic);
             data.appliedVariants.remove(GameType.MoJhoSto);
+            data.appliedVariants.remove(GameType.BasicLandGame);
+            break;
+        case BasicLandGame:
+            data.appliedVariants.remove(GameType.Commander);
+            data.appliedVariants.remove(GameType.Oathbreaker);
+            data.appliedVariants.remove(GameType.TinyLeaders);
+            data.appliedVariants.remove(GameType.Brawl);
+            data.appliedVariants.remove(GameType.Vanguard);
+            data.appliedVariants.remove(GameType.MomirBasic);
+            data.appliedVariants.remove(GameType.MoJhoSto);
+            data.appliedVariants.remove(GameType.DanDan);
             break;
         default:
             break;

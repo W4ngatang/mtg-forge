@@ -36,7 +36,8 @@ public class Domain extends ProgressiveAchievement {
 
     @Override
     protected boolean eval(Player player, Game game) {
-        if (game.getRules().hasAppliedVariant(GameType.MomirBasic) || game.getRules().hasAppliedVariant(GameType.MoJhoSto)) {
+        if (game.getRules().hasAppliedVariant(GameType.MomirBasic) || game.getRules().hasAppliedVariant(GameType.MoJhoSto)
+                || game.getRules().hasAppliedVariant(GameType.BasicLandGame)) {
             // Not an achievement in Momir Basic (easy to get due to predefined deck contents)
             return false;
         }

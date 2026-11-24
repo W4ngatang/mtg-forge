@@ -85,6 +85,6 @@ public class ChallengeAchievements extends AchievementCollection {
     public static boolean checkValidGameMode(final Game game) {
         // these modes use a fixed pre-defined deck format, so challenge achievements don't apply in them
         return !game.getRules().hasAppliedVariant(GameType.MomirBasic) && !game.getRules().hasAppliedVariant(GameType.MoJhoSto)
-                && !game.getRules().hasAppliedVariant(GameType.Puzzle);
+                && !game.getRules().hasAppliedVariant(GameType.BasicLandGame) && !game.getRules().hasAppliedVariant(GameType.Puzzle);
     }
 }

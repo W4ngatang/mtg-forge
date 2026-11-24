@@ -20,7 +20,8 @@ public class ManaFlooded extends Achievement {
 
     @Override
     protected int evaluate(Player player, Game game) {
-        if (game.getRules().hasAppliedVariant(GameType.MomirBasic) || game.getRules().hasAppliedVariant(GameType.MoJhoSto)) {
+        if (game.getRules().hasAppliedVariant(GameType.MomirBasic) || game.getRules().hasAppliedVariant(GameType.MoJhoSto)
+                || game.getRules().hasAppliedVariant(GameType.BasicLandGame)) {
             return 0; // in Momir Basic, getting a lot of lands out is not an achievement:w
         }
         if (player.getOutcome().hasWon()) {

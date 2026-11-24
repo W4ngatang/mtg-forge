@@ -96,7 +96,7 @@ public class VLobby implements ILobbyView {
     private static final ImmutableList<GameType> GAME_FORMATS = ImmutableList.of(
             GameType.Constructed, GameType.Commander, GameType.Oathbreaker,
             GameType.Brawl, GameType.TinyLeaders,
-            GameType.MomirBasic, GameType.MoJhoSto, GameType.DanDan);
+            GameType.MomirBasic, GameType.MoJhoSto, GameType.DanDan, GameType.BasicLandGame);
 
     private final FComboBoxPanel<GameType> cboFormatPanel =
             new FComboBoxPanel<>(Localizer.getInstance().getMessage("lblGameFormat") + ":", GAME_FORMATS);
@@ -404,7 +404,7 @@ public class VLobby implements ILobbyView {
 
         // Momir Basic and MoJhoSto write the Avatar section themselves, so Vanguard
         // cannot be layered on top. applyVariant already unticks it; say why.
-        final boolean avatarSetByFormat = hasVariant(GameType.MomirBasic) || hasVariant(GameType.MoJhoSto);
+        final boolean avatarSetByFormat = hasVariant(GameType.MomirBasic) || hasVariant(GameType.MoJhoSto) || hasVariant(GameType.BasicLandGame);
         if (avatarSetByFormat) {
             vntVanguard.setEnabled(false);
             vntVanguard.setToolTipText(localizer.getMessage("ttVanguardSetByFormat"));

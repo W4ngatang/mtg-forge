@@ -72,7 +72,17 @@ public enum GameType {
         return deck;
     }),
     DanDan        (DeckFormat.Constructed, false, false, false, "lblDanDan", "lblDanDanDesc", DanDanDeck::build,
-            EnumSet.of(ZoneType.Library, ZoneType.Graveyard));
+            EnumSet.of(ZoneType.Library, ZoneType.Graveyard)),
+    // The Basic Land Game: decks of basic lands whose rules card gives each basic an effect when played
+    BasicLandGame (DeckFormat.Constructed, false, false, false, "lblBasicLandGame", "lblBasicLandGameDesc", player -> {
+        Deck deck = new Deck();
+        CardPool mainDeck = deck.getMain();
+        for (String basic : new String[] { "Plains", "Island", "Swamp", "Mountain", "Forest" }) {
+            mainDeck.add(Aggregates.random(StaticData.instance().getCommonCards().getAllCards(basic), 10));
+        }
+        deck.getOrCreate(DeckSection.Avatar).add(StaticData.instance().getVariantCards().getCard("Basic Land Game"), 1);
+        return deck;
+    }, EnumSet.noneOf(ZoneType.class), false);
 
     private static final EnumSet<GameType> DRAFT_FORMATS = EnumSet.of(Draft, CommanderDraft, QuestDraft, AdventureEvent);
 
@@ -81,6 +91,7 @@ public enum GameType {
     private final String name, englishName, description;
     private final Function<RegisteredPlayer, Deck> deckAutoGenerator;
     private final Set<ZoneType> sharedZones;
+    private final boolean allowsMulligans;
 
     GameType(DeckFormat deckFormat0, boolean isCardPoolLimited0, boolean canSideboard0, boolean addWonCardsMidgame0, String name0, String description0) {
         this(deckFormat0, isCardPoolLimited0, canSideboard0, addWonCardsMidgame0, name0, description0, null);
@@ -89,6 +100,9 @@ public enum GameType {
         this(deckFormat0, isCardPoolLimited0, canSideboard0, addWonCardsMidgame0, name0, description0, deckAutoGenerator0, EnumSet.noneOf(ZoneType.class));
     }
     GameType(DeckFormat deckFormat0, boolean isCardPoolLimited0, boolean canSideboard0, boolean addWonCardsMidgame0, String name0, String description0, Function<RegisteredPlayer, Deck> deckAutoGenerator0, Set<ZoneType> sharedZones0) {
+        this(deckFormat0, isCardPoolLimited0, canSideboard0, addWonCardsMidgame0, name0, description0, deckAutoGenerator0, sharedZones0, true);
+    }
+    GameType(DeckFormat deckFormat0, boolean isCardPoolLimited0, boolean canSideboard0, boolean addWonCardsMidgame0, String name0, String description0, Function<RegisteredPlayer, Deck> deckAutoGenerator0, Set<ZoneType> sharedZones0, boolean allowsMulligans0) {
         final Localizer localizer = forge.util.Localizer.getInstance();
         deckFormat = deckFormat0;
         isCardPoolLimited = isCardPoolLimited0;
@@ -102,6 +116,7 @@ public enum GameType {
         description = description0;
         deckAutoGenerator = deckAutoGenerator0;
         sharedZones = sharedZones0;
+        allowsMulligans = allowsMulligans0;
     }
 
     /**
@@ -131,6 +146,11 @@ public enum GameType {
      * @return true when all players draw from one library. The first seat's deck becomes that
      * library, and the generated deck is only used when that seat chose none.
      */
+    /** False for formats where every player keeps their opening hand, as in the Basic Land Game. */
+    public boolean allowsMulligans() {
+        return allowsMulligans;
+    }
+
     public boolean hasSharedLibrary() {
         return sharedZones.contains(ZoneType.Library);
     }

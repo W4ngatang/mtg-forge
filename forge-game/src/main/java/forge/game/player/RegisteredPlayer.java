@@ -176,7 +176,7 @@ public class RegisteredPlayer {
             start.planes = planes;
     	}
         if (appliedVariants.contains(GameType.Vanguard) || appliedVariants.contains(GameType.MomirBasic)
-                || appliedVariants.contains(GameType.MoJhoSto)) { //fix the crash, if somehow the avatar is null, get it directly from the deck
+                || appliedVariants.contains(GameType.MoJhoSto) || appliedVariants.contains(GameType.BasicLandGame)) { //fix the crash, if somehow the avatar is null, get it directly from the deck
             start.setVanguardAvatars(vanguardAvatar == null ? deck.get(DeckSection.Avatar).toFlatList() : vanguardAvatar.toFlatList());
         }
     	return start;

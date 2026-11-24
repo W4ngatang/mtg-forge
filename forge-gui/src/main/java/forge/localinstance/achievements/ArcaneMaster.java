@@ -18,7 +18,8 @@ public class ArcaneMaster extends Achievement {
 
     @Override
     protected int evaluate(Player player, Game game) {
-        if (game.getRules().hasAppliedVariant(GameType.MomirBasic) || game.getRules().hasAppliedVariant(GameType.MoJhoSto)) {
+        if (game.getRules().hasAppliedVariant(GameType.MomirBasic) || game.getRules().hasAppliedVariant(GameType.MoJhoSto)
+                || game.getRules().hasAppliedVariant(GameType.BasicLandGame)) {
             return defaultValue; // Momir Basic is exempt from this achievement (custom rules do not require any spellcasting by default)
         }
         if (player.getOutcome().hasWon()) {

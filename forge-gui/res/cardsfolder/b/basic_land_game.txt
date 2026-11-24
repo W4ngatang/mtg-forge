@@ -1,0 +1,34 @@
+Name:Basic Land Game
+ManaCost:no cost
+Types:Vanguard
+HandLifeModifier:-2/+0
+S:Mode$ Continuous | EffectZone$ Command | Affected$ You | RaiseMaxHandSize$ 2 | Description$ You start with five cards in hand. Your maximum hand size is seven.
+S:Mode$ Continuous | EffectZone$ Command | Affected$ Forest.YouCtrl | AddTrigger$ ForestETB | AddSVar$ ForestRegrowth | Description$ Forests you control have "When this land enters, return target land card from your graveyard to your hand."
+SVar:ForestETB:Mode$ ChangesZone | Destination$ Battlefield | ValidCard$ Card.Self | Execute$ ForestRegrowth | TriggerDescription$ When CARDNAME enters, return target land card from your graveyard to your hand.
+SVar:ForestRegrowth:DB$ ChangeZone | Origin$ Graveyard | Destination$ Hand | ValidTgts$ Land.YouOwn | TgtPrompt$ Select target land card in your graveyard
+S:Mode$ Continuous | EffectZone$ Command | Affected$ Swamp.YouCtrl | AddTrigger$ SwampETB | AddSVar$ SwampDiscard | Description$ Swamps you control have "When this land enters, look at your opponent's hand. You may choose a land card from it. That player discards that card."
+SVar:SwampETB:Mode$ ChangesZone | Destination$ Battlefield | ValidCard$ Card.Self | Execute$ SwampDiscard | TriggerDescription$ When CARDNAME enters, look at your opponent's hand. You may choose a land card from it. That player discards that card.
+SVar:SwampDiscard:DB$ Discard | Defined$ Player.Opponent | NumCards$ 1 | DiscardValid$ Land | Mode$ RevealYouChoose
+S:Mode$ Continuous | EffectZone$ Command | Affected$ Mountain.YouCtrl | AddTrigger$ MountainETB | AddSVar$ MountainDestroy | Description$ Mountains you control have "When this land enters, destroy target land an opponent controls."
+SVar:MountainETB:Mode$ ChangesZone | Destination$ Battlefield | ValidCard$ Card.Self | Execute$ MountainDestroy | TriggerDescription$ When CARDNAME enters, destroy target land an opponent controls.
+SVar:MountainDestroy:DB$ Destroy | ValidTgts$ Land.OppCtrl | TgtPrompt$ Select target land an opponent controls
+S:Mode$ Continuous | EffectZone$ Command | Affected$ Island.YouCtrl | AddTrigger$ IslandETB | AddSVar$ IslandDraw | Description$ Islands you control have "When this land enters, draw a card."
+SVar:IslandETB:Mode$ ChangesZone | Destination$ Battlefield | ValidCard$ Card.Self | Execute$ IslandDraw | TriggerDescription$ When CARDNAME enters, draw a card.
+SVar:IslandDraw:DB$ Draw | Defined$ You | NumCards$ 1
+S:Mode$ Continuous | EffectZone$ Command | Affected$ Plains.YouCtrl | AddTrigger$ PlainsETB | AddSVar$ PlainsBlink & PlainsReturn & PlainsCleanup | Description$ Plains you control have "When this land enters, exile another target non-Plains land you control, then return it to the battlefield under your control."
+SVar:PlainsETB:Mode$ ChangesZone | Destination$ Battlefield | ValidCard$ Card.Self | Execute$ PlainsBlink | TriggerDescription$ When CARDNAME enters, exile another target non-Plains land you control, then return it to the battlefield under your control.
+SVar:PlainsBlink:DB$ ChangeZone | ValidTgts$ Land.nonPlains+YouCtrl+Other | TgtPrompt$ Select another target non-Plains land you control | Origin$ Battlefield | Destination$ Exile | RememberTargets$ True | SubAbility$ PlainsReturn
+SVar:PlainsReturn:DB$ ChangeZone | Defined$ Remembered | Origin$ All | Destination$ Battlefield | GainControl$ True | SubAbility$ PlainsCleanup
+SVar:PlainsCleanup:DB$ Cleanup | ClearRemembered$ True
+S:Mode$ Continuous | EffectZone$ Command | Affected$ Island.YouOwn | AffectedZone$ Hand | AddAbility$ IslandCounter | AddSVar$ IslandCounterLand & IslandCounterCleanup | Description$ Islands in your hand have "Discard this card and another land card: Counter target ability of a land an opponent controls. Put that land into its owner's graveyard."
+SVar:IslandCounter:AB$ Counter | Cost$ Discard<1/CARDNAME> Discard<1/Land.Other/another land card> | ActivationZone$ Hand | TargetType$ Triggered | ValidTgts$ Card.Land+OppCtrl | TgtPrompt$ Select target ability of a land an opponent controls | SubAbility$ IslandCounterLand | SpellDescription$ Counter target ability of a land an opponent controls. Put that land into its owner's graveyard.
+SVar:IslandCounterLand:DB$ ChangeZone | Defined$ TargetedSource | Origin$ Battlefield | Destination$ Graveyard
+T:Mode$ Always | TriggerZones$ Command | CheckSVar$ Domain | SVarCompare$ GE5 | Static$ True | Execute$ TrigWin | TriggerDescription$ When you control lands of all five basic land types, you win the game.
+T:Mode$ Always | TriggerZones$ Command | IsPresent$ Plains.YouCtrl | PresentCompare$ GE5 | Static$ True | Execute$ TrigWin | TriggerDescription$ When you control five Plains, you win the game.
+T:Mode$ Always | TriggerZones$ Command | IsPresent$ Island.YouCtrl | PresentCompare$ GE5 | Static$ True | Execute$ TrigWin | TriggerDescription$ When you control five Islands, you win the game.
+T:Mode$ Always | TriggerZones$ Command | IsPresent$ Swamp.YouCtrl | PresentCompare$ GE5 | Static$ True | Execute$ TrigWin | TriggerDescription$ When you control five Swamps, you win the game.
+T:Mode$ Always | TriggerZones$ Command | IsPresent$ Mountain.YouCtrl | PresentCompare$ GE5 | Static$ True | Execute$ TrigWin | TriggerDescription$ When you control five Mountains, you win the game.
+T:Mode$ Always | TriggerZones$ Command | IsPresent$ Forest.YouCtrl | PresentCompare$ GE5 | Static$ True | Execute$ TrigWin | TriggerDescription$ When you control five Forests, you win the game.
+SVar:TrigWin:DB$ WinsGame | Defined$ You
+SVar:Domain:Count$Domain
+Oracle:You start with five cards in hand. Your maximum hand size is seven.\nYou win the game when you control lands of all five basic land types, or five lands of one basic land type.\nForest — When it enters, return target land card from your graveyard to your hand.\nSwamp — When it enters, look at your opponent's hand. You may choose a land card from it. That player discards that card.\nMountain — When it enters, destroy target land an opponent controls.\nIsland — When it enters, draw a card. Islands in your hand have "Discard this card and another land card: Counter target ability of a land an opponent controls. Put that land into its owner's graveyard."\nPlains — When it enters, exile another target non-Plains land you control, then return it to the battlefield.

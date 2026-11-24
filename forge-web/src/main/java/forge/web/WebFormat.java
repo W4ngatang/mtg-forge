@@ -9,7 +9,9 @@ import forge.game.GameType;
  */
 public enum WebFormat {
     DANDAN(GameType.DanDan, "DanDan", "Both players share one library and graveyard. The host picks the shared deck.", true),
-    MOMIR(GameType.MomirBasic, "Momir Basic", "Decks of basic lands; discard a card and pay X to make a random creature with mana value X.", false);
+    MOMIR(GameType.MomirBasic, "Momir Basic", "Decks of basic lands; discard a card and pay X to make a random creature with mana value X.", false),
+    BASIC_LAND_GAME(GameType.BasicLandGame, "Basic Land Game",
+            "Ten of each basic. Each basic does something when played; win with all five types, or five of one.", false);
 
     public final GameType gameType;
     public final String label;

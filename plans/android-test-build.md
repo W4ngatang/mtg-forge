@@ -40,7 +40,31 @@ Choosing the DanDan variant saves the standard list as an ordinary constructed d
 
 Any size works. The game ends when someone draws from the empty shared library, so smaller decks mean shorter games.
 
-## Rules as implemented
+## Play the Basic Land Game
+
+**Classic Mode → New Game → Constructed**, then in **Variants** choose **Basic Land Game**. Both decks are built for you: ten of each basic land, plus the format's rules card in the command zone (long-press it to read the rules). Set the second seat to **AI** or play a friend online.
+
+The rules follow [Skura's write-up](https://ultimateguard.com/en/blog/basic-land-game-rules-gameplay-strategy-magic-the-gathering-skura/):
+- **Setup:** draw five cards, no mulligans, one land per turn.
+- **Win:** control all five basic land types, or five lands of one type.
+- **Each land, when it enters:**
+  - **Forest:** return a land card from your graveyard to your hand.
+  - **Swamp:** look at your opponent's hand and make them discard a land of your choice.
+  - **Mountain:** destroy a land your opponent controls.
+  - **Island:** draw a card.
+  - **Plains:** blink another of your non-Plains lands so its effect happens again.
+- **Island in hand:** discard it and another land to counter your opponent's land as it comes in. The land and its effect are gone: tap the Island in your hand when the land's effect is on the stack, and choose the counter ability.
+
+Where the write-up leaves things open, Forge does this:
+- **Forest** returns a land from *your* graveyard ("a land in the graveyard" in the write-up).
+- **Max hand size** is the usual seven.
+- **Drawing from an empty library** loses, as in normal Magic.
+- **Counter after a Plains blink:** an Island can also counter a land's effect that a Plains made happen again; that land goes to the graveyard too.
+- **Targets after a Plains blink:** when a Plains blinks a Forest or Mountain, the new target is chosen when its effect goes on the stack, so your opponent sees it before deciding whether to counter. The write-up says that choice stays hidden.
+
+The computer plays the format well enough to win but never uses the Island counter.
+
+## DanDan rules as implemented
 
 - Both players draw from one library and put cards into one graveyard.
 - A card you draw is yours: it returns to your hand, and it's under your control.

@@ -134,6 +134,16 @@ public class GameRules {
         return shared;
     }
 
+    /** False when an applied variant has every player keep their opening hand. */
+    public boolean allowsMulligans() {
+        for (final GameType variant : appliedVariants) {
+            if (!variant.allowsMulligans()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public boolean hasCommander() {
         return appliedVariants.contains(GameType.Commander)
                 || appliedVariants.contains(GameType.Oathbreaker)
