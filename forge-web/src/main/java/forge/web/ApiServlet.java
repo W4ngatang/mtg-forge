@@ -20,7 +20,8 @@ import forge.deck.Deck;
  * The lobby, as JSON over HTTP under {@code /api}:
  * <pre>
  * GET    /api/formats                      the formats on offer
- * GET    /api/session                      whether the host password given is right
+ * GET    /api/session                      whether this browser is past the site password, and whether the host password given is right
+ * POST   /api/login                        enter the site password
  * POST   /api/games                        create a game (host password)
  * GET    /api/games/{id}?invite=TOKEN      what an invite link is for
  * POST   /api/games/{id}/join              take the friend's seat with the invite
@@ -70,12 +71,33 @@ public class ApiServlet extends HttpServlet {
             case "GET formats": return formats();
             case "GET session": {
                 JsonObject o = new JsonObject();
+                o.addProperty("site", server.gate().admitted(req));
                 o.addProperty("host", server.passwordMatches(req.getHeader("X-Host-Password")));
                 return o;
             }
+            case "POST login": {
+                if (!server.gate().passwordMatches(str(body(req), "password"))) {
+                    try {
+                        Thread.sleep(700); // slows guessing
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    throw new ApiError(403, "That's not the password.");
+                }
+                server.gate().admit(req, resp);
+                return ok();
+            }
             case "POST games": hostOnly(req); return createGame(body(req));
-            case "GET games/*": return inviteInfo(parts[1], req.getParameter("invite"));
-            case "POST games/*/join": return join(parts[1], body(req));
+            case "GET games/*": {
+                JsonObject o = inviteInfo(parts[1], req.getParameter("invite"));
+                server.gate().admit(req, resp); // a valid invite lets a friend past the site password
+                return o;
+            }
+            case "POST games/*/join": {
+                JsonObject o = join(parts[1], body(req));
+                server.gate().admit(req, resp);
+                return o;
+            }
             case "GET decks": hostOnly(req); return decks();
             case "PUT decks": hostOnly(req); return saveDeck(body(req));
             case "DELETE decks": hostOnly(req); return deleteDeck(req.getParameter("name"));

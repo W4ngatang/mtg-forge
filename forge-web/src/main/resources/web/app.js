@@ -45,6 +45,7 @@ function forgetSeat(game) {
   const all = seats();
   delete all[game];
   store.set("seats", all);
+  try { localStorage.removeItem("forge.order." + game); } catch (e) { /* nothing stored */ }
 }
 
 async function api(method, path, body) {
@@ -54,6 +55,10 @@ async function api(method, path, body) {
   const res = await fetch("/api" + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   let data = {};
   try { data = await res.json(); } catch (e) { /* empty body */ }
+  if (res.status === 401 && data.locked) {
+    siteOk = false;
+    loginPage();
+  }
   if (!res.ok) {
     const err = new Error(data.error || `Request failed (${res.status})`);
     err.status = res.status;
@@ -75,9 +80,11 @@ function go(hash) { location.hash = hash; }
 
 // ---------- routing ----------
 window.addEventListener("hashchange", route);
-function route() {
+async function route() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
   if (parts[0] !== "play") leaveGame();
+  // an invite link lets a friend in without the site password
+  if (parts[0] !== "join" && !(await siteOpen())) return loginPage();
   switch (parts[0]) {
     case "new": return newGamePage();
     case "decks": return decksPage();
@@ -99,6 +106,41 @@ function back(label, hash) {
   return h("div", { class: "top-nav" }, h("button", { class: "btn small", onclick: () => go(hash) }, "‹ " + label));
 }
 
+// ---------- site password ----------
+let siteOk = false;
+async function siteOpen() {
+  if (siteOk) return true;
+  try {
+    const res = await fetch("/api/session");
+    siteOk = res.ok && (await res.json()).site !== false;
+  } catch (e) { siteOk = true; } // offline: let the page say so later
+  return siteOk;
+}
+function loginPage() {
+  leaveGame();
+  const input = h("input", { type: "password", placeholder: "Password", autocomplete: "current-password", autofocus: true });
+  const msg = h("div", { class: "error" });
+  const button = h("button", { class: "btn primary block" }, "Enter");
+  const submit = async e => {
+    if (e) e.preventDefault();
+    msg.textContent = ""; button.disabled = true;
+    try {
+      const res = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: input.value }) });
+      if (!res.ok) { msg.textContent = "That's not the password."; input.select(); return; }
+      siteOk = true;
+      route();
+    } catch (err) { msg.textContent = "Can't reach the server."; }
+    finally { button.disabled = false; }
+  };
+  app.textContent = "";
+  app.append(h("div", { class: "gate" },
+    h("form", { class: "gate-card", onsubmit: submit },
+      h("div", { class: "brand" }, h("span", { class: "brand-mark" }, "✦"), "Forge"),
+      h("p", { class: "muted" }, "This table is private. Enter the password to sit down."),
+      input, msg, button)));
+  input.focus();
+}
+
 // ---------- host password ----------
 async function hostReady() {
   try { return (await api("GET", "/session")).host; } catch (e) { return true; } // can't tell: let the next step say
@@ -118,7 +160,7 @@ function passwordPanel(after) {
 
 // ---------- home ----------
 async function homePage() {
-  const p = page(h("h1", {}, "Forge"));
+  const p = page(h("h1", {}, "Forge"), h("p", { class: "muted tagline" }, "Magic with friends, straight from the browser."));
   if (!(await hostReady())) { p.append(passwordPanel(homePage)); return; }
   p.append(h("div", { class: "stack-v" },
     h("button", { class: "btn primary block", onclick: () => go("#/new") }, "New game"),
@@ -302,7 +344,7 @@ function playPage(game) {
     page(back("Home", "#/"), h("div", { class: "panel" }, "This browser isn't seated in that game. Open your invite link again, or start a new game."));
     return;
   }
-  Object.assign(G, { game, seat: mine.seat, cards: new Map(), failedImages: store.get("noImage", {}), retry: 0, hide: {} });
+  Object.assign(G, { game, seat: mine.seat, cards: new Map(), order: store.get("order." + game, {}), failedImages: store.get("noImage", {}), retry: 0, hide: {} });
   app.textContent = "";
   app.append(h("div", { class: "page" }, h("p", { class: "muted" }, "Connecting…")));
   connect();
@@ -365,7 +407,11 @@ let renderQueued = false;
 function scheduleRender() {
   if (renderQueued) return;
   renderQueued = true;
-  requestAnimationFrame(() => { renderQueued = false; if (G.state) renderGame(); });
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    if (G.dragging) { G.renderWanted = true; return; } // a render would drop the card being dragged
+    if (G.state) renderGame();
+  });
 }
 
 function renderWaiting() {
@@ -450,24 +496,136 @@ function cardEl(c, opts = {}) {
   const cached = !opts.noCache && G.cards.get(cacheKey);
   if (cached && cached.key === key) return cached.el;
   const el = h("div", { class: classes, "data-id": c.id }, cardFace(c, opts.size || "small"), c.hidden ? null : badges(c), opts.extra || null);
-  attachPress(el, () => (opts.onTap ? opts.onTap(c) : tapCard(c)), () => zoom(c));
+  attachPress(el, () => (opts.onTap ? opts.onTap(c) : tapCard(c)), () => zoom(c), c);
   if (!opts.noCache) G.cards.set(cacheKey, { key, el });
   return el;
 }
 
-/** Tap acts; a long press (or right click) shows the card large. */
-function attachPress(el, onTap, onLong) {
-  let timer = null, long = false, sx = 0, sy = 0;
+/** Tap acts; a long press (or right click) shows the card large. In a sortable row (data-sort on the
+    parent), a mouse drags as soon as it moves, and a finger drags after a long press: lifting it
+    without moving still shows the card large. With a mouse, hovering shows a large preview. */
+function attachPress(el, onTap, onLong, card) {
+  let timer = null, long = false, armed = false, down = false, dragging = false, sx = 0, sy = 0, type = "";
+  const sortable = () => !!(el.parentElement && el.parentElement.dataset.sort);
+  const clear = () => { clearTimeout(timer); timer = null; };
+  const disarm = () => { armed = false; el.classList.remove("lifted"); };
   el.addEventListener("pointerdown", e => {
-    long = false; sx = e.clientX; sy = e.clientY;
-    timer = setTimeout(() => { long = true; onLong(); }, 450);
+    if (e.button > 0) return;
+    down = true; long = false; dragging = false; disarm();
+    sx = e.clientX; sy = e.clientY; type = e.pointerType;
+    timer = setTimeout(() => {
+      timer = null; long = true;
+      if (type !== "mouse" && sortable()) {
+        armed = true; el.classList.add("lifted");
+        if (navigator.vibrate) navigator.vibrate(12);
+      } else onLong();
+    }, 450);
   });
-  const cancel = () => { clearTimeout(timer); timer = null; };
-  el.addEventListener("pointermove", e => { if (Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) > 10) cancel(); });
-  el.addEventListener("pointerup", cancel);
-  el.addEventListener("pointercancel", cancel);
-  el.addEventListener("contextmenu", e => { e.preventDefault(); cancel(); long = true; onLong(); });
+  el.addEventListener("pointermove", e => {
+    if (!down || dragging) return;
+    const dist = Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy);
+    if ((type === "mouse" && !long && dist > 6 && sortable()) || (armed && dist > 4)) {
+      clear(); disarm(); dragging = true; long = true; // the click after a drag does nothing
+      startDrag(el, e, () => { dragging = false; down = false; });
+    } else if (dist > 10) clear();
+  });
+  el.addEventListener("pointerup", () => {
+    clear(); down = false;
+    if (armed && !dragging) { disarm(); onLong(); }
+  });
+  el.addEventListener("pointercancel", () => { clear(); down = false; disarm(); });
+  // the browser must not scroll the row while a lifted card is being dragged
+  el.addEventListener("touchmove", e => { if (armed || dragging) e.preventDefault(); }, { passive: false });
+  el.addEventListener("contextmenu", e => {
+    e.preventDefault();
+    if (type === "touch" || type === "pen") return; // a long press already handled it
+    clear(); long = true; onLong();
+  });
   el.addEventListener("click", e => { if (long) { e.preventDefault(); return; } onTap(); });
+  if (card && canHover) {
+    el.addEventListener("pointerenter", e => { if (e.pointerType === "mouse" && !G.dragging) showPreview(el, card); });
+    el.addEventListener("pointerleave", () => hidePreview(el));
+  }
+}
+
+// ---------- drag to reorder ----------
+/** Moves the card itself through its row as a placeholder while a copy follows the pointer. */
+function startDrag(el, e, done) {
+  const box = el.parentElement, key = box.dataset.sort;
+  hidePreview();
+  const r = el.getBoundingClientRect();
+  const ox = e.clientX - r.left, oy = e.clientY - r.top;
+  const ghost = el.cloneNode(true);
+  ghost.classList.add("drag-ghost");
+  Object.assign(ghost.style, { width: r.width + "px", height: r.height + "px", left: r.left + "px", top: r.top + "px" });
+  document.body.append(ghost);
+  el.classList.add("drag-source");
+  G.dragging = true;
+  const move = ev => {
+    ev.preventDefault();
+    ghost.style.left = (ev.clientX - ox) + "px";
+    ghost.style.top = (ev.clientY - oy) + "px";
+    const br = box.getBoundingClientRect();
+    if (box.scrollWidth > box.clientWidth) {
+      if (ev.clientX < br.left + 32) box.scrollLeft -= 12;
+      else if (ev.clientX > br.right - 32) box.scrollLeft += 12;
+    }
+    // where the card goes: before the first card the pointer is above, or left of the middle of
+    const y = Math.min(Math.max(ev.clientY, br.top + 1), br.bottom - 1);
+    let before = null;
+    for (const s of box.children) {
+      if (s === el || !s.classList.contains("card")) continue;
+      const b = s.getBoundingClientRect();
+      if (y < b.top || (y <= b.bottom && ev.clientX < b.left + b.width / 2)) { before = s; break; }
+    }
+    if (before !== el.nextElementSibling || (!before && box.lastElementChild !== el)) box.insertBefore(el, before);
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", up);
+    ghost.remove();
+    el.classList.remove("drag-source");
+    G.dragging = false;
+    G.order[key] = [...box.children].map(c => c.dataset.id).filter(Boolean);
+    store.set("order." + G.game, G.order);
+    done();
+    if (G.renderWanted) { G.renderWanted = false; scheduleRender(); }
+  };
+  window.addEventListener("pointermove", move, { passive: false });
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", up);
+}
+
+/** The cards in the order the player dragged them into; cards new to the row go at the end. */
+function arranged(key, cards) {
+  const ord = G.order && G.order[key];
+  if (!ord) return cards;
+  const pos = new Map(ord.map((id, i) => [id, i]));
+  const at = (c, i) => pos.has(String(c.id)) ? pos.get(String(c.id)) : 1e6 + i;
+  return cards.map((c, i) => [c, at(c, i)]).sort((a, b) => a[1] - b[1]).map(x => x[0]);
+}
+
+// ---------- hover preview (mouse only) ----------
+const canHover = !!(window.matchMedia && matchMedia("(hover: hover) and (pointer: fine)").matches);
+let preview = null;
+function showPreview(el, c) {
+  if (c.hidden) return;
+  hidePreview();
+  const r = el.getBoundingClientRect();
+  const w = Math.min(300, window.innerWidth * 0.42), ht = w * 88 / 63;
+  let left = r.right + 12;
+  if (left + w > window.innerWidth - 8) left = r.left - w - 12;
+  left = Math.max(8, left);
+  const top = Math.min(Math.max(8, r.top + r.height / 2 - ht / 2), Math.max(8, window.innerHeight - ht - 8));
+  preview = h("div", { class: "card preview" }, cardFace(c, "normal"), badges(c));
+  Object.assign(preview.style, { width: w + "px", left: left + "px", top: top + "px" });
+  preview.anchor = el;
+  document.body.append(preview);
+}
+/** Hides the preview; given a card element, only if the preview is that card's. */
+function hidePreview(el) {
+  if (preview && (!el || preview.anchor === el)) { preview.remove(); preview = null; }
 }
 
 function tapCard(c) {
@@ -477,6 +635,7 @@ function tapCard(c) {
 
 function zoom(c) {
   if (c.hidden) return;
+  hidePreview();
   const z = h("div", { class: "zoom", onclick: () => z.remove() },
     h("div", { class: "card" }, cardFace(c, "normal"), badges(c)),
     h("div", { class: "details" }, [c.name, [c.cost, c.type].filter(Boolean).join(" · "), c.text].filter(Boolean).join("\n")),
@@ -497,9 +656,10 @@ function splitBattlefield(p) {
 
 function fieldEl(p, cls) {
   const { lands, others } = splitBattlefield(p);
+  const mine = p.id === G.state.you;
   return h("div", { class: "field " + cls },
-    h("div", { class: "cards" }, others.map(c => cardEl(c))),
-    h("div", { class: "cards lands" }, lands.map(c => cardEl(c))));
+    h("div", { class: "cards", "data-sort": mine ? "field" : null }, (mine ? arranged("field", others) : others).map(c => cardEl(c))),
+    h("div", { class: "cards lands", "data-sort": mine ? "lands" : null }, (mine ? arranged("lands", lands) : lands).map(c => cardEl(c))));
 }
 
 function sameIds(a, b) {
@@ -521,20 +681,29 @@ function playerBar(p, cls) {
   if (p.graveyard.length) chips.push(h("button", { class: "chip", onclick: e => { e.stopPropagation(); zoneSheet(sharedGy ? "Shared graveyard" : `${mine ? "Your" : p.name + "'s"} graveyard`, p.graveyard); } }, `GY ${p.graveyard.length}`));
   if (p.exile.length) chips.push(h("button", { class: "chip", onclick: e => { e.stopPropagation(); zoneSheet(`${mine ? "Your" : p.name + "'s"} exile`, p.exile); } }, `Exile ${p.exile.length}`));
   if (mine) chips.push(h("button", { class: "chip", onclick: e => { e.stopPropagation(); menuSheet(); } }, "☰"));
-  const classes = ["player-bar", cls, isTarget("player", p.id) && "target", isChosen("player", p.id) && "chosen"].filter(Boolean).join(" ");
+  const active = st.activePlayer === p.id;
+  const classes = ["player-bar", cls, active && "active", isTarget("player", p.id) && "target", isChosen("player", p.id) && "chosen"].filter(Boolean).join(" ");
   return h("div", { class: classes, onclick: () => send({ t: "player", id: p.id }) },
-    st.activePlayer === p.id ? h("span", { class: "turn-dot", title: "Their turn" }) : null,
+    h("span", { class: "life", title: "Life" }, p.life),
     h("span", { class: "name" }, mine ? "You" : p.name),
-    h("span", { class: "life" }, p.life),
+    active ? h("span", { class: "turn-pill" }, mine ? "Your turn" : "Their turn") : null,
+    !mine && p.priority && !st.gameOver && !waitingOnMe() ? h("span", { class: "chip thinking" }, "thinking…") : null,
     p.poison ? h("span", { class: "chip" }, `☠ ${p.poison}`) : null,
     h("div", { class: "chips" }, chips));
 }
 
+/** Whether the game is waiting for this player: a dialog, or a button to press. */
+function waitingOnMe() {
+  const b = G.buttons;
+  return !!(G.ask || (b && ((b.ok && b.ok.enabled) || (b.cancel && b.cancel.enabled))));
+}
+
 function middleEl() {
   const st = G.state;
-  const whose = st.activePlayer === st.you ? "Your" : (opp() ? opp().name + "'s" : "");
-  return h("div", { class: "middle" },
-    h("span", { class: "phase" }, st.turn ? `T${st.turn} · ${whose} ${(PHASES[st.phase] || st.phase).toLowerCase()}` : "Starting…"),
+  const mineTurn = st.activePlayer === st.you;
+  const whose = mineTurn ? "Your turn" : (opp() ? opp().name + "'s turn" : "");
+  return h("div", { class: "middle " + (st.turn ? (mineTurn ? "mine-turn" : "opp-turn") : "") },
+    st.turn ? h("span", { class: "phase" }, h("b", {}, whose), ` · T${st.turn} · ${(PHASES[st.phase] || st.phase).toLowerCase()}`) : h("span", { class: "phase" }, "Starting…"),
     st.stack.map(s => h("button", {
       class: ["stack-item", isTarget("stack", s.id) && "target", isChosen("stack", s.id) && "chosen"].filter(Boolean).join(" "),
       onclick: () => send({ t: "stack", id: s.id }),
@@ -568,7 +737,7 @@ function renderGame() {
   const scroll = {};
   document.querySelectorAll("[data-scroll]").forEach(el => { scroll[el.dataset.scroll] = [el.scrollLeft, el.scrollTop]; });
 
-  const hand = h("div", { class: "hand", "data-scroll": "hand" }, meP.hand.map(c => cardEl(c, { size: "small" })));
+  const hand = h("div", { class: "hand", "data-scroll": "hand", "data-sort": "hand" }, arranged("hand", meP.hand).map(c => cardEl(c, { size: "small" })));
   const oppField = fieldEl(oppP, "opp"); oppField.dataset.scroll = "opp";
   const myField = fieldEl(meP, "me"); myField.dataset.scroll = "me";
   const game = h("div", { class: "game" },
@@ -580,8 +749,20 @@ function renderGame() {
     const s = scroll[el.dataset.scroll];
     if (s) { el.scrollLeft = s[0]; el.scrollTop = s[1]; }
   });
+  if (preview && !preview.anchor.isConnected) hidePreview();
+  const turnKey = st.turn + ":" + st.activePlayer;
+  if (st.turn && G.turnKey !== turnKey && !st.gameOver) turnSplash(st.activePlayer === st.you);
+  G.turnKey = turnKey;
   renderAsk();
   renderOver();
+}
+
+/** A short banner across the board when the turn passes. */
+function turnSplash(mine) {
+  document.querySelectorAll(".turn-splash").forEach(s => s.remove());
+  const s = h("div", { class: "turn-splash " + (mine ? "mine" : "theirs") }, h("span", {}, mine ? "Your turn" : `${opp() ? opp().name : "Opponent"}'s turn`));
+  document.body.append(s);
+  setTimeout(() => s.remove(), 1600);
 }
 
 // ---------- sheets ----------

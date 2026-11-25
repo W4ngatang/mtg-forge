@@ -7,7 +7,8 @@ COPY res /app/res
 COPY forge-web.jar /app/forge-web.jar
 
 EXPOSE 8080
-# The host password comes from the FORGE_WEB_PASSWORD secret.
+# The host password comes from the FORGE_WEB_PASSWORD secret, the password for the whole site from
+# FORGE_SITE_PASSWORD (both optional).
 CMD ["java", "-XX:MaxRAMPercentage=75", "-Djava.awt.headless=true", \
      "-Dforge.web.assets=/app/", "-Dforge.web.data=/data", \
      "-jar", "/app/forge-web.jar", "8080"]

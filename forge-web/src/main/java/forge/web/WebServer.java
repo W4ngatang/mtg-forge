@@ -27,6 +27,7 @@ import forge.model.FModel;
  * <p>Run: {@code java -Dforge.web.assets=<folder holding res/> -jar forge-web-...-jar-with-dependencies.jar [port]}.
  * The host password, needed to create games and manage saved decks, comes from the
  * {@code FORGE_WEB_PASSWORD} environment variable; without it anyone who can reach the server can.
+ * The site password, needed to see anything at all, comes from {@code FORGE_SITE_PASSWORD} (see {@link SiteGate}).
  * Saved decks go in the folder named by {@code -Dforge.web.data} (default {@code forge-web-data}).
  */
 public class WebServer {
@@ -40,6 +41,7 @@ public class WebServer {
     private final Map<String, GameRoom> rooms = new ConcurrentHashMap<>();
     private final String password;
     private final DeckLists decks;
+    private final SiteGate gate = new SiteGate(System.getenv(SiteGate.PASSWORD_ENV));
     private Server jetty;
 
     public WebServer(String password) {
@@ -82,6 +84,7 @@ public class WebServer {
         if (web != null) {
             context.setResourceBase(web.toExternalForm());
         }
+        context.addFilter(new org.eclipse.jetty.servlet.FilterHolder(gate), "/*", java.util.EnumSet.of(javax.servlet.DispatcherType.REQUEST));
         context.addServlet(new ServletHolder("ws", new WebSocketServlet() {
             @Override
             public void configure(WebSocketServletFactory factory) {
@@ -116,6 +119,10 @@ public class WebServer {
         return room;
     }
 
+    SiteGate gate() {
+        return gate;
+    }
+
     DeckLists decks() {
         return decks;
     }
@@ -144,6 +151,9 @@ public class WebServer {
         String password = System.getenv(PASSWORD_ENV);
         if (password == null || password.isEmpty()) {
             System.err.println("Warning: " + PASSWORD_ENV + " is not set, so anyone who can reach this server can create games.");
+        }
+        if (System.getenv(SiteGate.PASSWORD_ENV) == null || System.getenv(SiteGate.PASSWORD_ENV).isEmpty()) {
+            System.err.println("Note: " + SiteGate.PASSWORD_ENV + " is not set, so the site is open to anyone who can reach it.");
         }
         WebServer server = new WebServer(password);
         server.start(port);

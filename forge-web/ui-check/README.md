@@ -9,7 +9,7 @@ Both scripts print any JavaScript errors at the end. Image 404s are expected whe
 
 ## Run
 
-Start a server from the repository root (the walkthrough needs the host password set):
+Start a server from the repository root (the walkthrough needs the host password set; if the server also has a site password, pass `FORGE_SITE_PASSWORD` to the scripts too):
 
 ```
 FORGE_WEB_PASSWORD=pick-one java -Dforge.web.assets=forge-gui/ -jar forge-web/target/forge-web-*-jar-with-dependencies.jar 8080

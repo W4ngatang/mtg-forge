@@ -8,7 +8,17 @@ const BASE = process.env.FORGE_URL || 'http://localhost:8080/';
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   const shot = async name => { await page.screenshot({ path: `${SHOTS}/${name}.png` }); console.log('shot', name); };
-  await page.goto(BASE);
+  // the site password, when the server has one (FORGE_SITE_PASSWORD)
+  const signIn = async p => {
+    await p.goto(BASE);
+    await p.waitForSelector('.gate-card, input[type=password]');
+    if (await p.$('.gate-card')) {
+      await p.fill('.gate-card input', process.env.FORGE_SITE_PASSWORD || '');
+      await p.click('.gate-card button');
+      await p.waitForSelector('text=Enter the host password');
+    }
+  };
+  await signIn(page);
   await page.fill('input[type=password]', (process.env.FORGE_WEB_PASSWORD || ''));
   await page.click('text=Continue');
   await page.click('text=New game');
@@ -43,7 +53,7 @@ const BASE = process.env.FORGE_URL || 'http://localhost:8080/';
     const turn = parseInt((phase.match(/T(\d+)/) || [0, 0])[1], 10);
     const prompt = await page.textContent('.prompt').catch(() => '');
     // on my main phase: play a land from hand first, then use the avatar once per turn
-    if (/Your main phase/.test(phase) && /Your move/.test(prompt)) {
+    if (/Your turn.*main phase/.test(phase) && /Your move/.test(prompt)) {
       const handLand = await page.$('.hand .card');
       if (handLand && turn !== landTurn) {
         landTurn = turn;

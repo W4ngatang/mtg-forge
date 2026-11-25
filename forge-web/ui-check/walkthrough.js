@@ -11,8 +11,18 @@ const BASE = process.env.FORGE_URL || 'http://localhost:8080/';
   page.on('pageerror', e => errors.push('host pageerror: ' + e.message));
   const shot = async (p, name) => { await p.screenshot({ path: `${SHOTS}/${name}.png` }); console.log('shot', name); };
 
+  // the site password, when the server has one (FORGE_SITE_PASSWORD)
+  const signIn = async p => {
+    await p.goto(BASE);
+    await p.waitForSelector('.gate-card, input[type=password]');
+    if (await p.$('.gate-card')) {
+      await p.fill('.gate-card input', process.env.FORGE_SITE_PASSWORD || '');
+      await p.click('.gate-card button');
+      await p.waitForSelector('text=Enter the host password');
+    }
+  };
   // password, home
-  await page.goto(BASE);
+  await signIn(page);
   await page.fill('input[type=password]', (process.env.FORGE_WEB_PASSWORD || ''));
   await page.click('text=Continue');
   await page.waitForSelector('text=New game');
@@ -62,7 +72,7 @@ const BASE = process.env.FORGE_URL || 'http://localhost:8080/';
       continue;
     }
     const phase = await page.textContent('.middle .phase').catch(() => '');
-    if (/Your main phase/.test(phase)) break;
+    if (/Your turn.*main phase/.test(phase)) break;
     const ok = await page.$('.action-bar .btn.primary:not([disabled])');
     if (ok) await ok.click();
     await page.waitForTimeout(500);
@@ -94,7 +104,7 @@ const BASE = process.env.FORGE_URL || 'http://localhost:8080/';
   const host2 = await browser.newContext(phone);
   const hp = await host2.newPage();
   hp.on('pageerror', e => errors.push('host2 pageerror: ' + e.message));
-  await hp.goto(BASE);
+  await signIn(hp);
   await hp.fill('input[type=password]', (process.env.FORGE_WEB_PASSWORD || ''));
   await hp.click('text=Continue');
   await hp.click('text=New game');
