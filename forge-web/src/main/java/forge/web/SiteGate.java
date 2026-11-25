@@ -72,11 +72,13 @@ final class SiteGate implements Filter {
                 + "; HttpOnly; SameSite=Lax" + (https ? "; Secure" : ""));
     }
 
-    /** Paths that work without the cookie: the page itself, signing in, and invite links (checked by the API). */
+    /** Paths that work without the cookie: the page itself, signing in, the format list, and invite links (checked by the API). */
     private static boolean open(HttpServletRequest req) {
         String path = req.getRequestURI();
         if (path.startsWith("/api/")) {
-            return path.equals("/api/session") || path.equals("/api/login") || path.matches("/api/games/[^/]+(/join)?/?");
+            // formats: also Fly's health check (fly.toml)
+            return path.equals("/api/session") || path.equals("/api/login") || path.equals("/api/formats")
+                    || path.matches("/api/games/[^/]+(/join)?/?");
         }
         // a game socket needs a seat token, which only the gated lobby or an invite hands out
         return !path.equals("/img") && !path.startsWith("/img/");
