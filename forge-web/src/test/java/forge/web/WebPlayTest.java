@@ -492,6 +492,24 @@ public class WebPlayTest {
         System.out.println("WEBPLAY friend game: turn " + end.get("turn") + ", " + end.get("winner") + " won");
     }
 
+    @Test(timeOut = 120_000)
+    public void testDeckBuilderLooksUpScryfallNamesInForge() throws Exception {
+        Map.Entry<Integer, JsonElement> r = api("POST", "/cards/known",
+                "{\"names\":[\"Lightning Bolt\",\"Delver of Secrets // Insectile Aberration\",\"Fire // Ice\",\"Not A Real Card\"]}", false);
+        assertEquals((int) r.getKey(), 200, r.getValue().toString());
+        JsonObject cards = r.getValue().getAsJsonObject().getAsJsonObject("cards");
+        JsonObject bolt = cards.getAsJsonObject("Lightning Bolt");
+        assertEquals(bolt.get("name").getAsString(), "Lightning Bolt");
+        assertEquals(bolt.get("cost").getAsString(), "{R}");
+        assertEquals(bolt.get("mv").getAsInt(), 1);
+        assertTrue(bolt.get("type").getAsString().contains("Instant"), bolt.toString());
+        // Scryfall names a double-faced card by both faces; Forge by its front face
+        assertEquals(cards.getAsJsonObject("Delver of Secrets // Insectile Aberration").get("name").getAsString(), "Delver of Secrets");
+        assertTrue(cards.has("Fire // Ice") && cards.get("Fire // Ice").isJsonObject(), cards.toString());
+        assertTrue(cards.get("Not A Real Card").isJsonNull(), cards.toString());
+        assertEquals((int) api("POST", "/cards/known", "{\"names\":\"Lightning Bolt\"}", false).getKey(), 400);
+    }
+
     @Test(timeOut = 300_000)
     public void testSharedDeckListsAreCheckedSavedAndUsed() throws Exception {
         JsonObject bad = api("POST", "/decks/check", "{\"text\":\"4 Brainstorm\\n2 Not A Real Card\"}", false).getValue().getAsJsonObject();

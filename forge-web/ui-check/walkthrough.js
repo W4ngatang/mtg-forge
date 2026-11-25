@@ -32,14 +32,16 @@ const BASE = process.env.FORGE_URL || 'http://localhost:8080/';
   await page.click('text=Shared decks');
   await page.click('text=New deck');
   await page.fill('input[placeholder="Deck name"]', 'Mini DanDan');
-  await page.fill('textarea', '12 Dandan\n24 Island\n4 Brainstorm\n4 Memory Lapse\n4 Accumulated Knowledge\n2 Nonexistent Card');
-  await page.click('text=Check');
-  await page.waitForSelector('.error:has-text("Unknown card")');
+  await page.click('.tab:has-text("Deck")'); // on a phone, pasting is on the Deck tab
+  await page.click('.list-io summary');
+  await page.fill('.list-io textarea', '12 Dandan\n24 Island\n4 Brainstorm\n4 Memory Lapse\n4 Accumulated Knowledge\n2 Nonexistent Card');
+  await page.click('text=Load into the deck');
+  await page.waitForSelector('.builder-msg:has-text("doesn\'t know")');
   await shot(page, '02-deck-check-error');
-  await page.fill('textarea', '12 Dandan\n24 Island\n4 Brainstorm\n4 Memory Lapse\n4 Accumulated Knowledge\n4 Mental Note');
-  await page.click('text=Check');
-  await page.waitForSelector('text=52 cards, all recognised');
-  await page.click('button:has-text("Save")');
+  await page.fill('.list-io textarea', '12 Dandan\n24 Island\n4 Brainstorm\n4 Memory Lapse\n4 Accumulated Knowledge\n4 Mental Note');
+  await page.click('text=Load into the deck');
+  await page.waitForSelector('text=Loaded 52 cards');
+  await page.click('button:has-text("Save deck")');
   await page.waitForSelector('text=Mini DanDan');
   await shot(page, '03-decks');
 

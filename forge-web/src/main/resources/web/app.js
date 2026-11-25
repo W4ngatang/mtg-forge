@@ -294,7 +294,7 @@ async function decksPage() {
   const p = page(back("Home", "#/"), h("h1", {}, "Shared decks"));
   if (!(await hostReady())) { p.append(passwordPanel(decksPage)); return; }
   p.append(h("div", { class: "muted", style: "margin-bottom:12px" },
-    "Deck lists the host can pick as the shared library in DanDan. Paste a list to import one; copy it to share."));
+    "Deck lists the host can pick as the shared library in DanDan. Build one by searching Scryfall, or paste a list."));
   p.append(h("button", { class: "btn primary block", onclick: () => go("#/deck/") }, "New deck"));
   let decks;
   try { decks = await api("GET", "/decks"); } catch (e) { p.append(h("div", { class: "error" }, e.message)); return; }
@@ -307,42 +307,268 @@ async function decksPage() {
   p.append(list);
 }
 
+// ---------- deck builder ----------
+const SCRYFALL = "https://api.scryfall.com";
+const BASICS = [["W", "Plains"], ["U", "Island"], ["B", "Swamp"], ["R", "Mountain"], ["G", "Forest"]];
+
+/** "4 Brainstorm" lines to [name, count] pairs; a line without a count is one copy. */
+function parseList(text) {
+  const out = [];
+  for (const raw of (text || "").split(/\r?\n/)) {
+    const line = raw.replace(/\s+#.*$/, "").trim();
+    if (!line || /^(deck|main|mainboard|sideboard|commander|companion)\s*:?$/i.test(line)) continue;
+    const m = line.match(/^(\d+)\s*x?\s+(.+)$/i);
+    const name = (m ? m[2] : line).replace(/\s+\([A-Z0-9]{2,6}\)(\s+\S+)?$/, "").trim(); // drop "(SET) 123"
+    if (name) out.push([name, m ? Math.max(1, Math.min(99, parseInt(m[1], 10))) : 1]);
+  }
+  return out;
+}
+
+/** A mana cost like "{2}{U}{U}" as small coloured symbols. */
+function manaPips(cost) {
+  const syms = (cost || "").match(/\{[^}]+\}/g) || [];
+  return syms.map(sym => {
+    const k = sym.slice(1, -1).toUpperCase();
+    const color = /^[WUBRG]$/.test(k) ? k : (/^[WUBRG]\/[WUBRGP]$/.test(k) ? k[0] : "C");
+    return h("span", { class: `pip pip-${color}`, title: sym }, k.length > 2 ? k.replace("/", "") : k);
+  });
+}
+
+/** Scryfall's image for a card, front face for double-faced cards. */
+function scryImage(card, size) {
+  const uris = card.image_uris || (card.card_faces && card.card_faces[0] && card.card_faces[0].image_uris);
+  return uris ? uris[size] : null;
+}
+
 async function deckEditorPage(deckName) {
   const p = page(back("Decks", "#/decks"), h("h1", {}, deckName ? "Edit deck" : "New deck"));
   if (!(await hostReady())) { p.append(passwordPanel(() => deckEditorPage(deckName))); return; }
+  p.classList.add("wide");
   let text = "";
   if (deckName) {
     try { const d = (await api("GET", "/decks")).find(x => x.name.toLowerCase() === deckName.toLowerCase()); text = d ? d.text : ""; }
     catch (e) { p.append(h("div", { class: "error" }, e.message)); return; }
   }
+
+  // the deck: Forge name -> count, in the order cards were added; info: Forge name -> {type, cost, mv} or null
+  const deck = new Map();
+  const info = new Map();
+  const known = new Map(); // any name as asked (Scryfall's spelling) -> Forge's card, or null
+  async function lookUp(names) {
+    const ask = [...new Set(names)].filter(n => !known.has(n));
+    for (let i = 0; i < ask.length; i += 200) {
+      const r = await api("POST", "/cards/known", { names: ask.slice(i, i + 200) });
+      for (const [n, c] of Object.entries(r.cards)) {
+        known.set(n, c);
+        if (c) info.set(c.name, c);
+      }
+    }
+  }
+  async function loadText(t) {
+    const pairs = parseList(t);
+    await lookUp(pairs.map(x => x[0]));
+    deck.clear();
+    for (const [n, k] of pairs) {
+      const c = known.get(n);
+      const key = c ? c.name : n; // unknown names stay, marked, so nothing typed is lost
+      deck.set(key, (deck.get(key) || 0) + k);
+      if (!c) info.set(key, null);
+    }
+  }
+  function deckText() { return [...deck].map(([n, k]) => `${k} ${n}`).join("\n") + (deck.size ? "\n" : ""); }
+  function total() { let t = 0; for (const k of deck.values()) t += k; return t; }
+  function add(name, d) {
+    const k = (deck.get(name) || 0) + d;
+    if (k <= 0) deck.delete(name); else deck.set(name, Math.min(99, k));
+    drawDeck(); drawResultCounts();
+  }
+
   const name = h("input", { type: "text", value: deckName, placeholder: "Deck name", maxlength: 40 });
+  const msg = h("div", { class: "muted builder-msg" });
+  const show = (ok, t) => { msg.className = (ok ? "muted" : "error") + " builder-msg"; msg.textContent = t; };
+
+  // ---- search ----
+  const q = h("input", { type: "search", placeholder: "Card name, or Scryfall search: t:creature c:u mv<=2", autocomplete: "off", autocapitalize: "off", spellcheck: "false" });
+  const results = h("div", { class: "results" });
+  const more = h("button", { class: "btn block", hidden: true }, "More results");
+  const status = h("div", { class: "muted small search-status" }, "Type to search Scryfall. Plain words match any part of a card's name.");
+  let seq = 0, nextPage = null, timer = null;
+  async function search(url, append) {
+    const mine = ++seq;
+    status.textContent = "Searching…";
+    let data;
+    try {
+      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      data = await res.json();
+      if (mine !== seq) return;
+      if (!res.ok) {
+        if (!append) results.textContent = "";
+        more.hidden = true;
+        status.textContent = res.status === 404 ? "No cards match." : (data.details || "Scryfall couldn't run that search.");
+        return;
+      }
+    } catch (e) {
+      if (mine === seq) status.textContent = "Can't reach Scryfall right now.";
+      return;
+    }
+    const cards = data.data || [];
+    try { await lookUp(cards.map(c => c.name)); } catch (e) { /* shown below as unknown */ }
+    if (mine !== seq) return;
+    if (!append) { results.textContent = ""; results.scrollTop = 0; }
+    for (const c of cards) results.append(resultEl(c));
+    nextPage = data.has_more ? data.next_page : null;
+    more.hidden = !nextPage;
+    const playable = cards.filter(c => known.get(c.name)).length;
+    status.textContent = `${data.total_cards} ${data.total_cards === 1 ? "card" : "cards"} on Scryfall` +
+      (playable < cards.length ? ` · ${cards.length - playable} shown here aren't in Forge yet` : "");
+    if (data.warnings && data.warnings.length) status.textContent += " · " + data.warnings.join(" ");
+    drawResultCounts();
+  }
+  function runSearch() {
+    const text = q.value.trim();
+    if (text.length < 2) { seq++; results.textContent = ""; more.hidden = true; status.textContent = "Type at least two letters."; return; }
+    search(`${SCRYFALL}/cards/search?unique=cards&order=name&q=${encodeURIComponent(text)}`, false);
+  }
+  q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(runSearch, 350); });
+  q.addEventListener("keydown", e => { if (e.key === "Enter") { clearTimeout(timer); runSearch(); } });
+  more.addEventListener("click", () => { if (nextPage) search(nextPage, true); });
+
+  function resultEl(c) {
+    const forge = known.get(c.name);
+    const img = scryImage(c, "normal");
+    const el = h("button", { class: "result" + (forge ? "" : " unknown"), "data-name": forge ? forge.name : "", title: forge ? `Add ${forge.name}` : `${c.name}: not in Forge yet` },
+      img ? h("img", { src: img, alt: c.name, loading: "lazy", draggable: "false" }) : h("div", { class: "result-text" }, h("b", {}, c.name), h("span", {}, c.type_line || "")),
+      h("span", { class: "result-count", hidden: true }),
+      forge ? null : h("span", { class: "result-flag" }, "Not in Forge"));
+    el.addEventListener("click", () => {
+      if (!forge) { toast(`${c.name} isn't in Forge yet, so it can't go in a deck.`); return; }
+      add(forge.name, 1);
+      el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump");
+    });
+    el.addEventListener("contextmenu", e => { e.preventDefault(); if (img) showLarge(img, c.name); });
+    if (canHover && img) {
+      el.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") hoverImg(el, img); });
+      el.addEventListener("pointerleave", () => hidePreview(el));
+    }
+    return el;
+  }
+  function drawResultCounts() {
+    for (const el of results.querySelectorAll(".result")) {
+      const n = el.dataset.name ? deck.get(el.dataset.name) || 0 : 0;
+      const badge = el.querySelector(".result-count");
+      badge.hidden = !n; badge.textContent = n ? "×" + n : "";
+      el.classList.toggle("in-deck", n > 0);
+    }
+  }
+  function hoverImg(el, src) {
+    hidePreview();
+    const r = el.getBoundingClientRect();
+    const w = Math.min(300, window.innerWidth * 0.42), ht = w * 88 / 63;
+    let left = r.right + 12;
+    if (left + w > window.innerWidth - 8) left = r.left - w - 12;
+    left = Math.max(8, left);
+    const top = Math.min(Math.max(8, r.top + r.height / 2 - ht / 2), Math.max(8, window.innerHeight - ht - 8));
+    preview = h("div", { class: "card preview" }, h("img", { src, alt: "" }));
+    Object.assign(preview.style, { width: w + "px", left: left + "px", top: top + "px" });
+    preview.anchor = el;
+    document.body.append(preview);
+  }
+  function showLarge(src, alt) {
+    const z = h("div", { class: "zoom", onclick: () => z.remove() }, h("div", { class: "card" }, h("img", { src, alt })), h("div", { class: "muted" }, "Tap anywhere to close"));
+    document.body.append(z);
+  }
+
+  // ---- the deck ----
+  const deckBox = h("div", { class: "deck-list" });
+  const countEl = h("span", { class: "deck-count" });
+  const GROUPS = [["Creatures", t => /Creature/.test(t)], ["Instants and sorceries", t => /Instant|Sorcery/.test(t)],
+    ["Other spells", t => !/Land/.test(t)], ["Lands", t => /Land/.test(t)]];
+  function drawDeck() {
+    deckBox.textContent = "";
+    const n = total();
+    countEl.textContent = `${n} ${n === 1 ? "card" : "cards"}`;
+    tabDeck.textContent = `Deck (${n})`;
+    if (!deck.size) { deckBox.append(h("div", { class: "muted empty" }, "No cards yet. Search, then tap a card to add it.")); return; }
+    const left = new Set(deck.keys());
+    const unknown = [...left].filter(nm => !info.get(nm));
+    unknown.forEach(nm => left.delete(nm));
+    const sections = [];
+    for (const [title, test] of GROUPS) {
+      const names = [...left].filter(nm => test(info.get(nm).type));
+      names.forEach(nm => left.delete(nm));
+      if (names.length) sections.push([title, names]);
+    }
+    if (unknown.length) sections.unshift(["Not found in Forge", unknown]);
+    for (const [title, names] of sections) {
+      names.sort((a, b) => ((info.get(a) || {}).mv || 0) - ((info.get(b) || {}).mv || 0) || a.localeCompare(b));
+      const k = names.reduce((s, nm) => s + deck.get(nm), 0);
+      deckBox.append(h("div", { class: "deck-group" + (title === "Not found in Forge" ? " bad" : "") }, h("span", {}, title), h("span", { class: "muted" }, k)));
+      for (const nm of names) {
+        const c = info.get(nm);
+        deckBox.append(h("div", { class: "deck-row" },
+          h("button", { class: "step-btn", "aria-label": "One fewer", onclick: () => add(nm, -1) }, "−"),
+          h("b", { class: "qty" }, deck.get(nm)),
+          h("button", { class: "step-btn", "aria-label": "One more", onclick: () => add(nm, 1) }, "+"),
+          h("span", { class: "row-name", title: c ? c.type : "Forge doesn't know this card. Fix the name or remove it." }, nm),
+          h("span", { class: "row-cost" }, c ? manaPips(c.cost) : "?")));
+      }
+    }
+  }
+  const basics = h("div", { class: "basics" }, h("span", { class: "muted small" }, "Add a basic:"),
+    BASICS.map(([sym, land]) => h("button", { class: `chip mana mana-${sym}`, title: `Add ${land}`, onclick: async () => {
+      if (!info.has(land)) { try { await lookUp([land]); } catch (e) { return; } }
+      add(land, 1);
+    } }, `+ ${land}`)));
+
+  // ---- paste and copy ----
   const area = h("textarea", { placeholder: "One card per line, count first:\n10 Dandân\n20 Island" });
-  area.value = text;
-  const msg = h("div", { class: "muted" });
-  const show = (ok, t) => { msg.className = ok ? "muted" : "error"; msg.textContent = t; };
+  const listPanel = h("details", { class: "list-io" }, h("summary", {}, "Paste or copy a list"),
+    h("div", { class: "stack-v", style: "margin-top:10px" }, area,
+      h("div", { class: "row wrap" },
+        h("button", { class: "btn", onclick: async () => {
+          try { await loadText(area.value); drawDeck(); drawResultCounts(); const bad = [...deck.keys()].filter(nm => !info.get(nm)); show(!bad.length, bad.length ? `Forge doesn't know: ${bad.join(", ")}` : `Loaded ${total()} cards.`); }
+          catch (e) { show(false, e.message); }
+        } }, "Load into the deck"),
+        h("button", { class: "btn", onclick: async () => {
+          area.value = deckText();
+          try { await navigator.clipboard.writeText(area.value); show(true, "Copied the list."); } catch (e) { area.select(); show(true, "Select all and copy."); }
+        } }, "Copy the deck"))));
+  listPanel.addEventListener("toggle", () => { if (listPanel.open && !area.value.trim()) area.value = deckText(); });
+
+  // ---- save ----
+  const save = h("button", { class: "btn primary", onclick: async () => {
+    const bad = [...deck.keys()].filter(nm => !info.get(nm));
+    if (bad.length) { show(false, `Fix or remove first: ${bad.join(", ")}`); return; }
+    try {
+      const r = await api("PUT", "/decks", { name: name.value, text: deckText() });
+      if (deckName && deckName.toLowerCase() !== r.name.toLowerCase()) await api("DELETE", "/decks?name=" + encodeURIComponent(deckName));
+      go("#/decks");
+    } catch (e) { show(false, e.message); }
+  } }, "Save deck");
+
+  // ---- layout: search and deck side by side, or as tabs on a phone ----
+  const searchPane = h("section", { class: "pane search-pane" }, q, status, results, more);
+  const deckPane = h("section", { class: "pane deck-pane" },
+    h("div", { class: "deck-head" }, h("b", {}, "Deck"), countEl), basics, deckBox, listPanel);
+  const tabSearch = h("button", { class: "tab on", onclick: () => setTab("search") }, "Search");
+  const tabDeck = h("button", { class: "tab", onclick: () => setTab("deck") }, "Deck (0)");
+  function setTab(t) {
+    builder.dataset.tab = t;
+    tabSearch.classList.toggle("on", t === "search");
+    tabDeck.classList.toggle("on", t === "deck");
+  }
+  const builder = h("div", { class: "builder", "data-tab": "search" }, h("div", { class: "tabs" }, tabSearch, tabDeck), searchPane, deckPane);
   p.append(h("div", { class: "stack-v" },
     h("label", { class: "field" }, "Name", name),
-    h("label", { class: "field" }, "Cards", area), msg,
-    h("div", { class: "row wrap" },
-      h("button", { class: "btn", onclick: async () => {
-        try { const r = await api("POST", "/decks/check", { text: area.value }); show(!r.problems.length, r.problems.length ? r.problems.join("\n") : `${r.cards} cards, all recognised`); }
-        catch (e) { show(false, e.message); }
-      } }, "Check"),
-      h("button", { class: "btn", onclick: async () => {
-        try { await navigator.clipboard.writeText(area.value); show(true, "Copied the list."); }
-        catch (e) { area.select(); show(true, "Select all and copy."); }
-      } }, "Copy list"),
-      h("button", { class: "btn primary", onclick: async () => {
-        try {
-          const r = await api("PUT", "/decks", { name: name.value, text: area.value });
-          if (deckName && deckName.toLowerCase() !== r.name.toLowerCase()) await api("DELETE", "/decks?name=" + encodeURIComponent(deckName));
-          go("#/decks");
-        } catch (e) { show(false, e.message); }
-      } }, "Save")),
-    deckName ? h("button", { class: "btn danger", onclick: async () => {
-      if (!confirm(`Delete "${deckName}"?`)) return;
-      try { await api("DELETE", "/decks?name=" + encodeURIComponent(deckName)); go("#/decks"); } catch (e) { show(false, e.message); }
-    } }, "Delete deck") : null));
+    builder, msg,
+    h("div", { class: "row wrap builder-actions" }, save,
+      deckName ? h("button", { class: "btn danger", onclick: async () => {
+        if (!confirm(`Delete "${deckName}"?`)) return;
+        try { await api("DELETE", "/decks?name=" + encodeURIComponent(deckName)); go("#/decks"); } catch (e) { show(false, e.message); }
+      } }, "Delete deck") : null)));
+  try { if (text) await loadText(text); } catch (e) { show(false, e.message); }
+  drawDeck();
+  if (!deckName) q.focus();
 }
 
 // =====================================================================================

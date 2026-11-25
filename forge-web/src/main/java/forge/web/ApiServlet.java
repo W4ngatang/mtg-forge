@@ -14,6 +14,10 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import forge.StaticData;
+import forge.card.CardDb;
+import forge.card.CardRules;
+import forge.card.mana.ManaCost;
 import forge.deck.Deck;
 
 /**
@@ -29,6 +33,7 @@ import forge.deck.Deck;
  * PUT    /api/decks                        save one (host password)
  * DELETE /api/decks?name=NAME              delete one (host password)
  * POST   /api/decks/check                  check a pasted list
+ * POST   /api/cards/known                  which card names Forge can play, with their type and cost
  * </pre>
  * The host password goes in the {@code X-Host-Password} header, never the URL.
  */
@@ -101,6 +106,11 @@ public class ApiServlet extends HttpServlet {
             case "GET decks": hostOnly(req); return decks();
             case "PUT decks": hostOnly(req); return saveDeck(body(req));
             case "DELETE decks": hostOnly(req); return deleteDeck(req.getParameter("name"));
+            case "POST cards/*":
+                if (parts[1].equals("known")) {
+                    return known(body(req));
+                }
+                throw new ApiError(404, "No such page.");
             case "POST decks/*":
                 if (parts[1].equals("check")) {
                     return check(body(req));
@@ -257,6 +267,48 @@ public class ApiServlet extends HttpServlet {
             throw new ApiError(404, "No such deck.");
         }
         return ok();
+    }
+
+    private static final int MAX_LOOKUPS = 200;
+
+    /**
+     * For each name (as Scryfall spells it), the card Forge has under it, or null when Forge can't
+     * play it. A double-faced card is "Front // Back" on Scryfall and its front face in Forge.
+     */
+    private static JsonObject known(JsonObject b) {
+        JsonElement names = b.get("names");
+        if (names == null || !names.isJsonArray()) {
+            throw new ApiError(400, "Expected a list of names.");
+        }
+        if (names.getAsJsonArray().size() > MAX_LOOKUPS) {
+            throw new ApiError(413, "At most " + MAX_LOOKUPS + " names at a time.");
+        }
+        CardDb db = StaticData.instance().getCommonCards();
+        JsonObject cards = new JsonObject();
+        for (JsonElement e : names.getAsJsonArray()) {
+            String name = e.isJsonPrimitive() ? e.getAsString().trim() : "";
+            if (name.isEmpty() || name.length() > 200 || cards.has(name)) {
+                continue;
+            }
+            CardRules rules = db.getRules(name, true);
+            if (rules == null && name.contains(" // ")) {
+                rules = db.getRules(name.substring(0, name.indexOf(" // ")), true);
+            }
+            if (rules == null || rules.isUnsupported() || db.getCard(rules.getName()) == null) {
+                cards.add(name, com.google.gson.JsonNull.INSTANCE);
+                continue;
+            }
+            JsonObject o = new JsonObject();
+            o.addProperty("name", rules.getName());
+            o.addProperty("type", rules.getType().toString());
+            ManaCost cost = rules.getManaCost();
+            o.addProperty("cost", cost == null ? "" : cost.getSimpleString());
+            o.addProperty("mv", cost == null ? 0 : cost.getCMC());
+            cards.add(name, o);
+        }
+        JsonObject o = new JsonObject();
+        o.add("cards", cards);
+        return o;
     }
 
     private static JsonObject check(JsonObject b) {
