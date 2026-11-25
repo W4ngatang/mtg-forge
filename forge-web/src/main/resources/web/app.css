@@ -521,3 +521,5 @@ textarea { min-height: 220px; font-family: ui-monospace, Menlo, monospace; font-
 }
 .pip-W { background: #f3ecd0; } .pip-U { background: #8ec5f0; } .pip-B { background: #b9aebf; }
 .pip-R { background: #f3a68e; } .pip-G { background: #9fd7a8; } .pip-C { background: #cfd3d8; }
+/* holding a result shows it large, so the phone's own image menu must not open */
+.result { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; touch-action: manipulation; }

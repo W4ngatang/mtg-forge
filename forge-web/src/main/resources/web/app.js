@@ -440,7 +440,17 @@ async function deckEditorPage(deckName) {
       img ? h("img", { src: img, alt: c.name, loading: "lazy", draggable: "false" }) : h("div", { class: "result-text" }, h("b", {}, c.name), h("span", {}, c.type_line || "")),
       h("span", { class: "result-count", hidden: true }),
       forge ? null : h("span", { class: "result-flag" }, "Not in Forge"));
-    el.addEventListener("click", () => {
+    // hold to see the card large; the tap that ends a hold doesn't add it
+    let holdTimer = null, held = false, hx = 0, hy = 0;
+    el.addEventListener("pointerdown", e => {
+      held = false; hx = e.clientX; hy = e.clientY;
+      if (e.pointerType === "mouse" || !img) return;
+      holdTimer = setTimeout(() => { held = true; if (navigator.vibrate) navigator.vibrate(12); showLarge(img, c.name); }, 400);
+    });
+    el.addEventListener("pointermove", e => { if (Math.abs(e.clientX - hx) + Math.abs(e.clientY - hy) > 10) clearTimeout(holdTimer); });
+    for (const t of ["pointerup", "pointercancel"]) el.addEventListener(t, () => clearTimeout(holdTimer));
+    el.addEventListener("click", e => {
+      if (held) { e.preventDefault(); held = false; return; }
       if (!forge) { toast(`${c.name} isn't in Forge yet, so it can't go in a deck.`); return; }
       add(forge.name, 1);
       el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump");
@@ -474,8 +484,8 @@ async function deckEditorPage(deckName) {
     document.body.append(preview);
   }
   function showLarge(src, alt) {
-    const z = h("div", { class: "zoom", onclick: () => z.remove() }, h("div", { class: "card" }, h("img", { src, alt })), h("div", { class: "muted" }, "Tap anywhere to close"));
-    document.body.append(z);
+    hidePreview();
+    zoomOverlay(h("div", { class: "card" }, h("img", { src, alt })), h("div", { class: "muted" }, "Tap anywhere to close"));
   }
 
   // ---- the deck ----
@@ -761,23 +771,24 @@ function attachPress(el, onTap, onLong, card) {
     sx = e.clientX; sy = e.clientY; type = e.pointerType;
     timer = setTimeout(() => {
       timer = null; long = true;
-      if (type !== "mouse" && sortable()) {
-        armed = true; el.classList.add("lifted");
-        if (navigator.vibrate) navigator.vibrate(12);
-      } else onLong();
-    }, 450);
+      // holding shows the card large at once; on a finger, sliding on from there drags it instead
+      if (type !== "mouse" && sortable()) { armed = true; el.classList.add("lifted"); }
+      if (type !== "mouse" && navigator.vibrate) navigator.vibrate(12);
+      onLong();
+    }, 400);
   });
   el.addEventListener("pointermove", e => {
     if (!down || dragging) return;
     const dist = Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy);
-    if ((type === "mouse" && !long && dist > 6 && sortable()) || (armed && dist > 4)) {
+    if ((type === "mouse" && !long && dist > 6 && sortable()) || (armed && dist > 10)) {
+      if (armed) closeZoom(); // the finger moved on: it wants to drag, not look
       clear(); disarm(); dragging = true; long = true; // the click after a drag does nothing
       startDrag(el, e, () => { dragging = false; down = false; });
     } else if (dist > 10) clear();
   });
   el.addEventListener("pointerup", () => {
     clear(); down = false;
-    if (armed && !dragging) { disarm(); onLong(); }
+    if (armed && !dragging) disarm(); // the large card stays up until a tap closes it
   });
   el.addEventListener("pointercancel", () => { clear(); down = false; disarm(); });
   // the browser must not scroll the row while a lifted card is being dragged
@@ -879,14 +890,24 @@ function tapCard(c) {
   send({ t: "card", id: c.id });
 }
 
+function closeZoom() { document.querySelectorAll(".zoom").forEach(z => z.remove()); }
+/** A full-screen overlay. Only a tap that starts on it closes it, so lifting the finger that opened
+    it (however long it was held) leaves it up. */
+function zoomOverlay(...children) {
+  closeZoom();
+  let touched = false;
+  const z = h("div", { class: "zoom", onpointerdown: () => { touched = true; }, onclick: () => { if (touched) z.remove(); } }, ...children);
+  document.body.append(z);
+  return z;
+}
+
 function zoom(c) {
   if (c.hidden) return;
   hidePreview();
-  const z = h("div", { class: "zoom", onclick: () => z.remove() },
+  zoomOverlay(
     h("div", { class: "card" }, cardFace(c, "normal"), badges(c)),
     h("div", { class: "details" }, [c.name, [c.cost, c.type].filter(Boolean).join(" · "), c.text].filter(Boolean).join("\n")),
     h("div", { class: "muted" }, "Tap anywhere to close"));
-  document.body.append(z);
 }
 
 function cardName(id) {
