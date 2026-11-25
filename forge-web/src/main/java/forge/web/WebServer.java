@@ -49,7 +49,9 @@ public class WebServer {
     }
 
     public WebServer(String password, Path dataFolder) {
-        this.password = password == null || password.isEmpty() ? null : password;
+        // a space or newline copied along with the secret would otherwise make the right password fail
+        String trimmed = password == null ? "" : password.strip();
+        this.password = trimmed.isEmpty() ? null : trimmed;
         this.decks = new DeckLists(dataFolder.resolve("decks"));
     }
 
@@ -143,7 +145,7 @@ public class WebServer {
         if (password == null) {
             return true;
         }
-        return given != null && MessageDigest.isEqual(password.getBytes(StandardCharsets.UTF_8), given.getBytes(StandardCharsets.UTF_8));
+        return given != null && MessageDigest.isEqual(password.getBytes(StandardCharsets.UTF_8), given.strip().getBytes(StandardCharsets.UTF_8));
     }
 
     public static void main(String[] args) throws Exception {

@@ -13,8 +13,8 @@ const BASE = process.env.FORGE_URL || 'http://localhost:8080/';
     await p.goto(BASE);
     await p.waitForSelector('.gate-card, input[type=password]');
     if (await p.$('.gate-card')) {
-      await p.fill('.gate-card input', process.env.FORGE_SITE_PASSWORD || '');
-      await p.click('.gate-card button');
+      await p.fill('.gate-card input[type=password]', process.env.FORGE_SITE_PASSWORD || '');
+      await p.click('.gate-card button.btn');
       await p.waitForSelector('text=Enter the host password');
     }
   };

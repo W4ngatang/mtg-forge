@@ -32,7 +32,9 @@ final class SiteGate implements Filter {
     private final String token;
 
     SiteGate(String password) {
-        this.password = password == null || password.isEmpty() ? null : password;
+        // a space or newline copied along with the secret would otherwise make the right password fail
+        String trimmed = password == null ? "" : password.strip();
+        this.password = trimmed.isEmpty() ? null : trimmed;
         this.token = this.password == null ? null : digest("forge-site|" + this.password);
     }
 
@@ -42,7 +44,7 @@ final class SiteGate implements Filter {
 
     boolean passwordMatches(String given) {
         return password == null || (given != null
-                && MessageDigest.isEqual(password.getBytes(StandardCharsets.UTF_8), given.getBytes(StandardCharsets.UTF_8)));
+                && MessageDigest.isEqual(password.getBytes(StandardCharsets.UTF_8), given.strip().getBytes(StandardCharsets.UTF_8)));
     }
 
     /** Whether this request carries the access cookie (always true when there is no site password). */

@@ -18,6 +18,7 @@ import forge.game.combat.CombatView;
 import forge.game.player.PlayerView;
 import forge.game.spellability.StackItemView;
 import forge.game.zone.ZoneType;
+import forge.util.collect.FCollection;
 
 /**
  * Game state as one JSON object, as one player is allowed to see it. Cards the player may not
@@ -195,8 +196,13 @@ final class StateJson {
                 o.addProperty("defender", defender.getId());
             }
             JsonArray blockers = new JsonArray();
-            if (combat.getBlockers(attacker) != null) {
-                for (CardView b : combat.getBlockers(attacker)) {
+            // while blocks are being declared they are only "planned"; once declared, they are the blockers
+            FCollection<CardView> list = combat.getBlockers(attacker);
+            if (list == null || list.isEmpty()) {
+                list = combat.getPlannedBlockers(attacker);
+            }
+            if (list != null) {
+                for (CardView b : list) {
                     blockers.add(b.getId());
                 }
             }

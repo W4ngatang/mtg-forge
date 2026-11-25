@@ -357,3 +357,86 @@ textarea { min-height: 220px; font-family: ui-monospace, Menlo, monospace; font-
 }
 .brand-mark { display: block; font-size: 22px; margin-bottom: 2px; }
 .tagline { margin: -12px 0 20px; }
+
+/* ---------- tray: cards offered from off the board ---------- */
+.tray {
+  position: fixed; left: 8px; right: 8px; bottom: calc(78px + var(--safe-bottom)); z-index: 15;
+  background: linear-gradient(180deg, #1d2530, var(--panel)); border: 1px solid var(--gold-2);
+  border-radius: 14px; padding: 10px; box-shadow: 0 12px 32px rgba(0,0,0,.6);
+  max-width: 720px; margin: 0 auto;
+}
+.tray-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--gold); }
+.tray-cards { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.tray-cards .card { flex: 0 0 var(--hand-w); width: var(--hand-w); }
+
+/* ---------- password box with a show button ---------- */
+.pw-field { position: relative; }
+.pw-field input { padding-right: 48px; }
+.pw-field .eye {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 40px; height: 40px; border: 0; background: none; border-radius: 8px;
+  font-size: 18px; cursor: pointer; opacity: .55; filter: grayscale(1);
+}
+.pw-field .eye:hover { opacity: .85; }
+.pw-field .eye.on { opacity: 1; filter: none; background: rgba(232,193,112,.12); }
+
+/* ---------- the game menu, always top left ---------- */
+.menu-btn {
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
+  font-size: 18px; line-height: 1; cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0,0,0,.3);
+}
+.menu-btn:hover { border-color: var(--gold-2); color: var(--gold); }
+
+/* ---------- phase strip ---------- */
+.middle { flex-direction: column; align-items: stretch; gap: 4px; padding: 5px 10px; }
+.turn-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.turn-row .phase { display: inline-flex; align-items: baseline; gap: 6px; flex: 0 0 auto; }
+.turn-row .phase b { font-size: 13px; }
+.turn-no { font-size: 11px; color: var(--muted); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.phase-strip { display: flex; gap: 3px; overflow-x: auto; scrollbar-width: none; min-width: 0; flex: 1 1 auto; padding: 2px 0; }
+.phase-strip::-webkit-scrollbar { display: none; }
+.step {
+  position: relative; flex: 0 0 auto; font-size: 11px; font-weight: 600; letter-spacing: .02em;
+  padding: 3px 7px; border-radius: 999px; color: #6f7b8b; background: rgba(255,255,255,.03);
+  border: 1px solid transparent; white-space: nowrap; transition: all .2s ease;
+}
+.step.stop::after {
+  content: ""; position: absolute; left: 50%; bottom: -3px; width: 4px; height: 4px; margin-left: -2px;
+  border-radius: 50%; background: currentColor; opacity: .8;
+}
+.mine-turn .step.now { color: #062312; background: var(--mine); box-shadow: 0 0 12px rgba(60,207,122,.55); }
+.opp-turn .step.now { color: #2a0f04; background: var(--theirs); box-shadow: 0 0 12px rgba(255,138,92,.5); }
+.step.now.stop::after { background: currentColor; }
+.stack-row { display: flex; gap: 6px; overflow-x: auto; }
+@media (min-width: 600px) { .step { font-size: 12px; padding: 4px 10px; } .turn-row .phase b { font-size: 14px; } }
+
+/* ---------- settings in the menu ---------- */
+.small { font-size: 12px; }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.switch {
+  flex: 0 0 auto; width: 48px; height: 28px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--panel-2); position: relative; cursor: pointer; transition: background .2s ease;
+}
+.switch .knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #c9d1db; transition: transform .2s ease; }
+.switch.on { background: var(--mine); border-color: var(--mine); }
+.switch.on .knob { transform: translateX(20px); background: #fff; }
+.stop-row { margin-top: 8px; }
+.stop-label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+.stop-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.step-toggle {
+  font-size: 12px; padding: 5px 9px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);
+}
+.step-toggle.on { border-color: var(--gold-2); color: var(--gold); background: rgba(232,193,112,.12); }
+
+.step .short { display: none; }
+@media (max-width: 599px) {
+  .turn-row { flex-wrap: wrap; row-gap: 4px; }
+  .phase-strip { flex: 1 0 100%; justify-content: space-between; gap: 2px; }
+  .step { padding: 3px 5px; font-size: 11px; }
+  .step .long { display: none; }
+  .step .short { display: inline; }
+}

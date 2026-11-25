@@ -106,6 +106,24 @@ function back(label, hash) {
   return h("div", { class: "top-nav" }, h("button", { class: "btn small", onclick: () => go(hash) }, "‹ " + label));
 }
 
+// ---------- password fields ----------
+/** A password box with a button to show what was typed. The hidden username keeps password managers
+    from mixing up the site password and the host password, which share this site. */
+function passwordField(placeholder, username) {
+  const input = h("input", { type: "password", placeholder, autocomplete: "current-password", autocapitalize: "off", autocorrect: "off", spellcheck: "false" });
+  const eye = h("button", { type: "button", class: "eye", "aria-label": "Show password", title: "Show password" }, "👁");
+  eye.addEventListener("click", () => {
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    eye.classList.toggle("on", show);
+    eye.setAttribute("aria-label", show ? "Hide password" : "Show password");
+    eye.title = show ? "Hide password" : "Show password";
+    input.focus();
+  });
+  const user = h("input", { type: "text", name: "username", autocomplete: "username", value: username, hidden: true, readonly: true, tabindex: "-1" });
+  return { input, el: h("div", { class: "pw-field" }, user, input, eye) };
+}
+
 // ---------- site password ----------
 let siteOk = false;
 async function siteOpen() {
@@ -118,14 +136,14 @@ async function siteOpen() {
 }
 function loginPage() {
   leaveGame();
-  const input = h("input", { type: "password", placeholder: "Password", autocomplete: "current-password", autofocus: true });
+  const { input, el: field } = passwordField("Site password", "forge-site");
   const msg = h("div", { class: "error" });
   const button = h("button", { class: "btn primary block" }, "Enter");
   const submit = async e => {
     if (e) e.preventDefault();
     msg.textContent = ""; button.disabled = true;
     try {
-      const res = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: input.value }) });
+      const res = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: input.value.trim() }) });
       if (!res.ok) { msg.textContent = "That's not the password."; input.select(); return; }
       siteOk = true;
       route();
@@ -137,7 +155,7 @@ function loginPage() {
     h("form", { class: "gate-card", onsubmit: submit },
       h("div", { class: "brand" }, h("span", { class: "brand-mark" }, "✦"), "Forge"),
       h("p", { class: "muted" }, "This table is private. Enter the password to sit down."),
-      input, msg, button)));
+      field, msg, button)));
   input.focus();
 }
 
@@ -146,16 +164,16 @@ async function hostReady() {
   try { return (await api("GET", "/session")).host; } catch (e) { return true; } // can't tell: let the next step say
 }
 function passwordPanel(after) {
-  const input = h("input", { type: "password", placeholder: "Host password", autocomplete: "current-password" });
+  const { input, el: field } = passwordField("Host password", "forge-host");
   const msg = h("div", { class: "error" });
   const submit = async () => {
-    store.set("password", input.value);
+    store.set("password", input.value.trim());
     if (await hostReady()) after(); else msg.textContent = "That's not the host password.";
   };
   input.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
   return h("div", { class: "panel stack-v" },
     h("div", {}, "Enter the host password to start games and manage decks. Friends you invite don't need it."),
-    input, msg, h("button", { class: "btn primary", onclick: submit }, "Continue"));
+    field, msg, h("button", { class: "btn primary", onclick: submit }, "Continue"));
 }
 
 // ---------- home ----------
@@ -378,14 +396,14 @@ function send(o) { if (G.ws && G.ws.readyState === 1) G.ws.send(JSON.stringify(o
 
 function onMessage(m) {
   switch (m.t) {
-    case "joined": Object.assign(G, { format: m.format, youName: m.you, oppName: m.opponent }); break;
+    case "joined": Object.assign(G, { format: m.format, youName: m.you, oppName: m.opponent }); sendStops(); break;
     case "waiting": G.invite = m.invite; if (!G.state) renderWaiting(); return;
     case "state":
       G.state = m;
       if (m.gameOver) G.over = true;
       break;
     case "prompt": G.prompt = m; break;
-    case "buttons": G.buttons = m; break;
+    case "buttons": G.buttons = m; maybeAutoTap(); break;
     case "selection": G.selection = m; break;
     case "ask": G.ask = m; G.askHidden = false; G.askPicks = []; break;
     case "notice": toast((m.title ? m.title + ": " : "") + m.text); return;
@@ -479,7 +497,9 @@ function badges(c) {
   const out = [];
   if (c.power !== undefined) out.push(h("span", { class: "badge pt" + (c.damage ? " hurt" : "") }, `${c.power}/${c.toughness}` + (c.damage ? ` (−${c.damage})` : "")));
   if (c.counters) out.push(h("span", { class: "badge counters" }, Object.entries(c.counters).map(([k, v]) => `${v} ${k}`).join(" ")));
-  const tags = [c.token && "token", c.sick && "sick", c.zoneTag].filter(Boolean);
+  const blocks = G.state && G.state.combat ? G.state.combat.filter(a => a.blockers.includes(c.id)) : [];
+  const blockTag = blocks.length ? "blocks " + blocks.map(a => cardName(a.attacker)).join(", ") : null;
+  const tags = [c.token && "token", c.sick && "sick", blockTag, c.zoneTag].filter(Boolean);
   if (tags.length) out.push(h("span", { class: "badge tag" }, tags.join(" · ")));
   return out;
 }
@@ -643,6 +663,11 @@ function zoom(c) {
   document.body.append(z);
 }
 
+function cardName(id) {
+  for (const p of (G.state ? G.state.players : [])) for (const c of p.battlefield) if (c.id === id) return c.name;
+  return "an attacker";
+}
+
 // ---------- the board ----------
 function splitBattlefield(p) {
   const lands = [], others = [];
@@ -680,10 +705,11 @@ function playerBar(p, cls) {
   chips.push(h("span", { class: "chip" }, `${sharedLib ? "Shared library" : "Library"} ${p.libraryCount}`));
   if (p.graveyard.length) chips.push(h("button", { class: "chip", onclick: e => { e.stopPropagation(); zoneSheet(sharedGy ? "Shared graveyard" : `${mine ? "Your" : p.name + "'s"} graveyard`, p.graveyard); } }, `GY ${p.graveyard.length}`));
   if (p.exile.length) chips.push(h("button", { class: "chip", onclick: e => { e.stopPropagation(); zoneSheet(`${mine ? "Your" : p.name + "'s"} exile`, p.exile); } }, `Exile ${p.exile.length}`));
-  if (mine) chips.push(h("button", { class: "chip", onclick: e => { e.stopPropagation(); menuSheet(); } }, "☰"));
   const active = st.activePlayer === p.id;
   const classes = ["player-bar", cls, active && "active", isTarget("player", p.id) && "target", isChosen("player", p.id) && "chosen"].filter(Boolean).join(" ");
   return h("div", { class: classes, onclick: () => send({ t: "player", id: p.id }) },
+    // the menu (log, concede, home) stays in the top-left corner, above the opponent
+    mine ? null : h("button", { class: "menu-btn", "aria-label": "Menu", title: "Game log and options", onclick: e => { e.stopPropagation(); menuSheet(); } }, "☰"),
     h("span", { class: "life", title: "Life" }, p.life),
     h("span", { class: "name" }, mine ? "You" : p.name),
     active ? h("span", { class: "turn-pill" }, mine ? "Your turn" : "Their turn") : null,
@@ -695,19 +721,101 @@ function playerBar(p, cls) {
 /** Whether the game is waiting for this player: a dialog, or a button to press. */
 function waitingOnMe() {
   const b = G.buttons;
-  return !!(G.ask || (b && ((b.ok && b.ok.enabled) || (b.cancel && b.cancel.enabled))));
+  const sel = G.selection;
+  return !!(G.ask || (b && ((b.ok && b.ok.enabled) || (b.cancel && b.cancel.enabled)))
+    || (sel && ((sel.cards && sel.cards.length) || (sel.targets && sel.targets.length))));
 }
+
+/** The steps of a turn as the strip shows them; each lights up for the engine phases it covers. */
+const STEPS = [
+  { key: "UPKEEP", label: "Upkeep", short: "Upk", phases: ["UNTAP", "UPKEEP"] },
+  { key: "DRAW", label: "Draw", short: "Draw", phases: ["DRAW"] },
+  { key: "MAIN1", label: "Main 1", short: "Main", phases: ["MAIN1"] },
+  { key: "COMBAT_BEGIN", label: "Combat", short: "Cmbt", phases: ["COMBAT_BEGIN"] },
+  { key: "COMBAT_DECLARE_ATTACKERS", label: "Attack", short: "Atk", phases: ["COMBAT_DECLARE_ATTACKERS"] },
+  { key: "COMBAT_DECLARE_BLOCKERS", label: "Block", short: "Blk", phases: ["COMBAT_DECLARE_BLOCKERS"] },
+  { key: "COMBAT_DAMAGE", label: "Damage", short: "Dmg", phases: ["COMBAT_FIRST_STRIKE_DAMAGE", "COMBAT_DAMAGE", "COMBAT_END"] },
+  { key: "MAIN2", label: "Main 2", short: "Main 2", phases: ["MAIN2"] },
+  { key: "END_OF_TURN", label: "End", short: "End", phases: ["END_OF_TURN", "CLEANUP"] },
+];
 
 function middleEl() {
   const st = G.state;
   const mineTurn = st.activePlayer === st.you;
   const whose = mineTurn ? "Your turn" : (opp() ? opp().name + "'s turn" : "");
-  return h("div", { class: "middle " + (st.turn ? (mineTurn ? "mine-turn" : "opp-turn") : "") },
-    st.turn ? h("span", { class: "phase" }, h("b", {}, whose), ` · T${st.turn} · ${(PHASES[st.phase] || st.phase).toLowerCase()}`) : h("span", { class: "phase" }, "Starting…"),
-    st.stack.map(s => h("button", {
+  const stops = stopsFor(mineTurn);
+  const strip = h("div", { class: "phase-strip", "data-scroll": "phases" },
+    STEPS.map(step => h("span", {
+      class: ["step", step.phases.includes(st.phase) && "now", stops.includes(step.key) && "stop"].filter(Boolean).join(" "),
+      title: step.label + (stops.includes(step.key) ? " (the game stops here for you)" : ""),
+    }, h("span", { class: "long" }, step.label), h("span", { class: "short" }, step.short))));
+  const middle = h("div", { class: "middle " + (st.turn ? (mineTurn ? "mine-turn" : "opp-turn") : "") },
+    h("div", { class: "turn-row" },
+      st.turn
+        ? h("span", { class: "phase" }, h("b", {}, whose), h("span", { class: "turn-no" }, `T${st.turn}`),
+            h("span", { class: "sr" }, ` · ${(PHASES[st.phase] || st.phase).toLowerCase()}`))
+        : h("span", { class: "phase" }, "Starting…"),
+      st.turn ? strip : null),
+    st.stack.length ? h("div", { class: "stack-row" }, st.stack.map(s => h("button", {
       class: ["stack-item", isTarget("stack", s.id) && "target", isChosen("stack", s.id) && "chosen"].filter(Boolean).join(" "),
       onclick: () => send({ t: "stack", id: s.id }),
-    }, s.text)));
+    }, s.text))) : null);
+  // keep the lit step in view on narrow screens
+  requestAnimationFrame(() => {
+    const now = middle.querySelector(".step.now");
+    if (now && now.offsetParent) {
+      const sc = now.parentElement;
+      if (now.offsetLeft < sc.scrollLeft || now.offsetLeft + now.offsetWidth > sc.scrollLeft + sc.clientWidth) sc.scrollLeft = now.offsetLeft - 24;
+    }
+  });
+  return middle;
+}
+
+// ---------- settings: where the game stops for you, auto-tap ----------
+const DEFAULT_STOPS = {
+  own: ["MAIN1", "COMBAT_DECLARE_BLOCKERS", "MAIN2"],
+  opp: ["COMBAT_DECLARE_ATTACKERS", "COMBAT_DECLARE_BLOCKERS", "END_OF_TURN"],
+};
+function stops() { return store.get("stops", DEFAULT_STOPS); }
+function stopsFor(ownTurn) { return stops()[ownTurn ? "own" : "opp"] || []; }
+function sendStops() { send(Object.assign({ t: "stops" }, stops())); }
+function autoTap() { return store.get("autoTap", false); }
+
+/** With auto-tap on, a mana cost the game can pay by itself is paid at once (Forge's Auto button). */
+function maybeAutoTap() {
+  const b = G.buttons;
+  if (!autoTap() || !b || !b.ok || !b.ok.enabled || b.ok.label !== "Auto") return;
+  const key = JSON.stringify(b) + (G.prompt ? G.prompt.text : "");
+  if (G.autoTapped === key) return; // pressed it already for this payment
+  G.autoTapped = key;
+  setTimeout(() => { if (G.buttons === b) send({ t: "ok" }); }, 120);
+}
+
+function settingsEl(onChange) {
+  const box = h("div", { class: "settings" });
+  const draw = () => {
+    box.textContent = "";
+    const at = autoTap();
+    box.append(
+      h("div", { class: "setting-row" },
+        h("div", {}, h("b", {}, "Auto-tap mana"), h("div", { class: "muted small" }, "Pay costs with the lands the game picks, without tapping them yourself.")),
+        h("button", { class: "switch" + (at ? " on" : ""), role: "switch", "aria-checked": String(at), onclick: () => { store.set("autoTap", !at); draw(); onChange && onChange(); } },
+          h("span", { class: "knob" }))),
+      h("div", { class: "muted small", style: "margin-top:12px" }, "Stop and give me priority in these steps (with an empty stack; you always get to answer spells):"));
+    for (const [side, label] of [["own", "On my turn"], ["opp", "On their turn"]]) {
+      const cur = stops();
+      box.append(h("div", { class: "stop-row" }, h("span", { class: "stop-label" }, label),
+        h("div", { class: "stop-pills" }, STEPS.map(step => {
+          const on = (cur[side] || []).includes(step.key);
+          return h("button", { class: "step-toggle" + (on ? " on" : ""), onclick: () => {
+            const next = Object.assign({}, cur, { [side]: on ? cur[side].filter(k => k !== step.key) : [...(cur[side] || []), step.key] });
+            store.set("stops", next); sendStops(); draw(); onChange && onChange();
+          } }, step.label);
+        }))));
+    }
+  };
+  draw();
+  return box;
 }
 
 /** Forge's priority prompt repeats the turn and phase the strip above already shows; say what to do instead. */
@@ -741,7 +849,7 @@ function renderGame() {
   const oppField = fieldEl(oppP, "opp"); oppField.dataset.scroll = "opp";
   const myField = fieldEl(meP, "me"); myField.dataset.scroll = "me";
   const game = h("div", { class: "game" },
-    playerBar(oppP, "opp"), oppField, middleEl(), myField, playerBar(meP, "me"), hand, actionBar());
+    playerBar(oppP, "opp"), oppField, middleEl(), myField, playerBar(meP, "me"), hand, actionBar(), offBoardTray(meP, oppP));
 
   app.textContent = "";
   app.append(game);
@@ -755,6 +863,30 @@ function renderGame() {
   G.turnKey = turnKey;
   renderAsk();
   renderOver();
+}
+
+/** Cards the game shows or offers that the board doesn't draw: the opponent's hand when it's revealed
+    (a Swamp in the Basic Land Game, Thoughtseize-style effects), or offered cards in a graveyard,
+    library or exile. Tapping one picks it, as on the board. */
+function offBoardTray(meP, oppP) {
+  const onBoard = new Set();
+  for (const c of [...meP.hand, ...meP.battlefield, ...meP.command, ...oppP.battlefield, ...oppP.command]) onBoard.add(String(c.id));
+  const offered = new Set(((G.selection && G.selection.cards) || []).map(String));
+  const all = new Map();
+  for (const p of [meP, oppP]) for (const z of ["hand", "graveyard", "exile", "library"]) for (const c of p[z] || []) if (!c.hidden) all.set(String(c.id), c);
+  const picks = [...offered].filter(id => !onBoard.has(id) && all.has(id)).map(id => all.get(id));
+  const revealed = oppP.hand.filter(c => !c.hidden);
+  if (!picks.length && !revealed.length) return null;
+  const pickIds = new Set(picks.map(c => String(c.id)));
+  const shown = picks.concat(revealed.filter(c => !pickIds.has(String(c.id))));
+  const title = picks.length ? (picks.every(c => oppP.hand.includes(c)) ? `Pick from ${oppP.name}'s hand` : "Pick a card")
+    : `${oppP.name}'s hand`;
+  return h("div", { class: "tray" },
+    h("div", { class: "tray-title" }, title, h("span", { class: "muted" }, picks.length ? " · tap a card" : " · revealed")),
+    h("div", { class: "tray-cards", "data-scroll": "tray" }, shown.map(c => cardEl(c, {
+      cacheTag: "tray", size: "small",
+      onTap: pickIds.has(String(c.id)) ? tapCard : zoom, // a card only on show isn't a choice
+    }))));
 }
 
 /** A short banner across the board when the turn passes. */
@@ -784,7 +916,9 @@ function menuSheet() {
   closeSheets();
   const log = (G.state.log || []).slice().reverse();
   const s = sheet([
-    h("h3", {}, "Game log"),
+    h("h3", {}, "Settings"),
+    settingsEl(() => scheduleRender()),
+    h("h3", { style: "margin-top:18px" }, "Game log"),
     h("div", {}, log.length ? log.map(l => h("div", { class: "log-line" }, l)) : h("div", { class: "muted" }, "Nothing yet.")),
     h("div", { class: "actions" },
       h("button", { class: "btn danger", onclick: () => { if (confirm("Concede this game?")) { send({ t: "concede" }); s.remove(); } } }, "Concede"),

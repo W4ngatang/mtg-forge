@@ -62,8 +62,9 @@ import forge.util.ITriggerEvent;
  */
 public class WebGuiGame extends AbstractGuiGame {
     /** Phases where a player stops for priority with an empty stack; with something on it they always do. */
-    private static final Set<PhaseType> STOPS_ON_OWN_TURN = EnumSet.of(PhaseType.MAIN1, PhaseType.MAIN2);
-    private static final Set<PhaseType> STOPS_ON_OPPONENT_TURN = EnumSet.of(PhaseType.COMBAT_DECLARE_ATTACKERS, PhaseType.END_OF_TURN);
+    /** Where the game stops for this player with an empty stack, until the browser sends its own choice. */
+    private volatile Set<PhaseType> stopsOnOwnTurn = EnumSet.of(PhaseType.MAIN1, PhaseType.COMBAT_DECLARE_BLOCKERS, PhaseType.MAIN2);
+    private volatile Set<PhaseType> stopsOnOpponentTurn = EnumSet.of(PhaseType.COMBAT_DECLARE_ATTACKERS, PhaseType.COMBAT_DECLARE_BLOCKERS, PhaseType.END_OF_TURN);
     private static final long STATE_THROTTLE_MS = 150;
 
     private static final ScheduledExecutorService FLUSHER = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -165,12 +166,48 @@ public class WebGuiGame extends AbstractGuiGame {
     @Override public void updateCards(Iterable<CardView> cards) { super.updateCards(cards); stateChanged(); }
     @Override public void updateLives(Iterable<PlayerView> players) { super.updateLives(players); stateChanged(); }
     @Override public void updateManaPool(Iterable<PlayerView> players) { super.updateManaPool(players); stateChanged(); }
-    @Override public void showCombat() { stateChanged(); }
+    @Override
+    public void showCombat() {
+        // While attackers or blockers are being declared, the engine changes its combat without
+        // refreshing the game view's copy (the desktop draws those from separate events), so a
+        // block or attack would not show until the step ended. Refresh it first.
+        if (getGameController() instanceof forge.player.PlayerControllerHuman human && human.getGame() != null) {
+            human.getGame().updateCombatForView();
+        }
+        stateChanged();
+    }
 
     @Override
     public boolean isUiSetToSkipPhase(PlayerView playerTurn, PhaseType phase) {
         boolean ownTurn = playerTurn != null && playerTurn.equals(you());
-        return !(ownTurn ? STOPS_ON_OWN_TURN : STOPS_ON_OPPONENT_TURN).contains(phase);
+        return !(ownTurn ? stopsOnOwnTurn : stopsOnOpponentTurn).contains(phase);
+    }
+
+    /** The steps the browser lists ("stops" message); a step name the strip groups stands for all its phases. */
+    private static Set<PhaseType> stops(JsonElement list) {
+        Set<PhaseType> out = EnumSet.noneOf(PhaseType.class);
+        if (list == null || !list.isJsonArray()) {
+            return out;
+        }
+        for (JsonElement e : list.getAsJsonArray()) {
+            String name = e.isJsonPrimitive() ? e.getAsString() : "";
+            switch (name) {
+                case "UPKEEP" -> out.add(PhaseType.UPKEEP);
+                case "COMBAT_DAMAGE" -> out.addAll(EnumSet.of(PhaseType.COMBAT_FIRST_STRIKE_DAMAGE, PhaseType.COMBAT_DAMAGE, PhaseType.COMBAT_END));
+                case "END_OF_TURN" -> out.add(PhaseType.END_OF_TURN);
+                default -> {
+                    try {
+                        PhaseType p = PhaseType.valueOf(name);
+                        if (p != PhaseType.UNTAP && p != PhaseType.CLEANUP) { // nobody gets priority there
+                            out.add(p);
+                        }
+                    } catch (IllegalArgumentException ignored) {
+                        // not a step: skip it
+                    }
+                }
+            }
+        }
+        return out;
     }
 
     // ---- the interactive prompt --------------------------------------------------------------
@@ -601,6 +638,11 @@ public class WebGuiGame extends AbstractGuiGame {
         String type = m.has("t") ? m.get("t").getAsString() : "";
         if (type.equals("answer")) {
             answer(m); // never waits, so it is safe on the socket's thread
+            return;
+        }
+        if (type.equals("stops")) {
+            stopsOnOwnTurn = stops(m.get("own"));
+            stopsOnOpponentTurn = stops(m.get("opp"));
             return;
         }
         clicks.execute(() -> click(type, m));

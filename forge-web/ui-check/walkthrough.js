@@ -16,8 +16,8 @@ const BASE = process.env.FORGE_URL || 'http://localhost:8080/';
     await p.goto(BASE);
     await p.waitForSelector('.gate-card, input[type=password]');
     if (await p.$('.gate-card')) {
-      await p.fill('.gate-card input', process.env.FORGE_SITE_PASSWORD || '');
-      await p.click('.gate-card button');
+      await p.fill('.gate-card input[type=password]', process.env.FORGE_SITE_PASSWORD || '');
+      await p.click('.gate-card button.btn');
       await p.waitForSelector('text=Enter the host password');
     }
   };
@@ -95,7 +95,7 @@ const BASE = process.env.FORGE_URL || 'http://localhost:8080/';
     await shot(page, '09-zoom');
     await page.click('.zoom');
   }
-  await page.click('.player-bar.me .chip:has-text("☰")');
+  await page.click('.menu-btn');
   await page.waitForTimeout(300);
   await shot(page, '10-menu-log');
   await page.click('.sheet .btn:has-text("Close")');

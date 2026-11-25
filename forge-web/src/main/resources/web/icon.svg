@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- A placeholder icon: a gold four-pointed star on a dark tile -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f8e4b4"/>
+      <stop offset=".55" stop-color="#e8c170"/>
+      <stop offset="1" stop-color="#b98a3a"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#141a22"/>
+  <rect x="1.5" y="1.5" width="61" height="61" rx="12.5" fill="none" stroke="#b98a3a" stroke-opacity=".55" stroke-width="3"/>
+  <path d="M32 9 C34 24 40 30 55 32 C40 34 34 40 32 55 C30 40 24 34 9 32 C24 30 30 24 32 9 Z" fill="url(#g)"/>
+</svg>
