@@ -3,6 +3,7 @@
 #
 #   forge-web/deploy/deploy.sh            build and deploy
 #   forge-web/deploy/deploy.sh --stage    build and stage only (forge-web/target/deploy), no deploy
+#   forge-web/deploy/deploy.sh --local-only   build the image with Docker here instead of Fly's builder
 #
 # Needs FLY_API_TOKEN for deploying. Uses flyctl from PATH, or downloads the pinned release below
 # and checks it against Fly's published checksum.
@@ -54,4 +55,9 @@ if [ "${1:-}" = "--stage" ]; then
 fi
 FLYCTL="$(flyctl_path)"
 cd "$STAGE"
-"$FLYCTL" deploy --remote-only --config fly.toml "$@"
+# Fly's remote builder by default; --local-only (Docker on this machine) replaces it
+builder=(--remote-only)
+for arg in "$@"; do
+    if [ "$arg" = "--local-only" ]; then builder=(); fi
+done
+"$FLYCTL" deploy "${builder[@]}" --config fly.toml "$@"
