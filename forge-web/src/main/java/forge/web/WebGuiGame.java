@@ -166,15 +166,22 @@ public class WebGuiGame extends AbstractGuiGame {
     @Override public void updateCards(Iterable<CardView> cards) { super.updateCards(cards); stateChanged(); }
     @Override public void updateLives(Iterable<PlayerView> players) { super.updateLives(players); stateChanged(); }
     @Override public void updateManaPool(Iterable<PlayerView> players) { super.updateManaPool(players); stateChanged(); }
-    @Override
-    public void showCombat() {
-        // While attackers or blockers are being declared, the engine changes its combat without
-        // refreshing the game view's copy (the desktop draws those from separate events), so a
-        // block or attack would not show until the step ended. Refresh it first.
-        if (getGameController() instanceof forge.player.PlayerControllerHuman human && human.getGame() != null) {
-            human.getGame().updateCombatForView();
+    @Override public void showCombat() { stateChanged(); }
+
+    /**
+     * While attackers or blockers are being declared, the engine changes its combat without refreshing
+     * the game view's copy (the desktop draws those from separate events), so a block or attack would
+     * not show until the step ended. Refreshes it after a click in that prompt. This runs on the click's
+     * thread while the game thread waits for the prompt to finish: refreshing registers view objects in
+     * the game's tracker, which must not happen while the game thread walks the game (its undo snapshot).
+     */
+    private static void refreshCombatWhileDeclaring(IGameController controller) {
+        if (controller instanceof forge.player.PlayerControllerHuman human && human.getGame() != null) {
+            forge.gamemodes.match.input.Input input = human.getInputProxy().getInput();
+            if (input instanceof forge.gamemodes.match.input.InputBlock || input instanceof forge.gamemodes.match.input.InputAttack) {
+                human.getGame().updateCombatForView();
+            }
         }
-        stateChanged();
     }
 
     @Override
@@ -668,6 +675,8 @@ public class WebGuiGame extends AbstractGuiGame {
                         error("No such card.");
                     } else {
                         controller.selectCard(card, null, null);
+                        refreshCombatWhileDeclaring(controller);
+                        stateChanged();
                     }
                 }
                 case "player" -> {
